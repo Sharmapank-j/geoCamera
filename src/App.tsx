@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import JSZip from 'jszip'
 import { captureVideoFrame, stopStream } from './camera/capture'
 import { getCurrentLocation } from './location/geolocation'
@@ -193,7 +193,7 @@ const App = () => {
       setGpsStatus(location.accuracy != null && location.accuracy > settings.lowAccuracyThresholdM ? 'LOW ACCURACY' : accuracyLabel(location))
       return enriched
     } catch (e) {
-      const status = String(e.message || e)
+      const status = String(e)
       setGpsStatus(status as GpsStatus)
       if (status === 'LOCATION DENIED') setLocationPermission('Denied')
       return undefined
@@ -428,7 +428,7 @@ const App = () => {
   )
 }
 
-const SettingGroup = ({ title, children }: { title:string; children:React.ReactNode }) => <section className="setting-group"><p className="eyebrow">{title}</p><div className="setting-body">{children}</div></section>
+const SettingGroup = ({ title, children }: { title:string; children:ReactNode }) => <section className="setting-group"><p className="eyebrow">{title}</p><div className="setting-body">{children}</div></section>
 const StatusLine = ({ label, value }: {label:string;value:string}) => <div className="setting-line"><span>{label}</span><b>{value}</b></div>
 const Toggle = ({ label, checked, onChange }: {label:string;checked:boolean;onChange:(v:boolean)=>void}) => <label className="setting-line"><span>{label}</span><input type="checkbox" checked={checked} onChange={e=>onChange(e.target.checked)}/></label>
 
