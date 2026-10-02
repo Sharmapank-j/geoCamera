@@ -3,7 +3,7 @@ import type { AppSettings, PhotoRecord } from '../types'
 import { defaultAppSettings } from '../types'
 
 const DB_NAME = 'geotag-camera-db'
-const DB_VERSION = 1
+const DB_VERSION = 2
 
 const SETTINGS_KEY = 'app-settings'
 
@@ -13,12 +13,11 @@ export const getDb = () => {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(db) {
-        const photoStore = db.createObjectStore('photos', { keyPath: 'id' })
-        photoStore.createIndex('createdAt', 'createdAt')
-        photoStore.createIndex('hasLocation', 'hasLocation')
-
-        db.createObjectStore('settings')
-        db.createObjectStore('appState')
+        const photoStore = db.objectStoreNames.contains('photos') ? db.transaction.objectStore('photos') : db.createObjectStore('photos', { keyPath: 'id' })
+        if (!photoStore.indexNames.contains('createdAt')) photoStore.createIndex('createdAt', 'createdAt')
+        if (!photoStore.indexNames.contains('hasLocation')) photoStore.createIndex('hasLocation', 'hasLocation')
+        if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
+        if (!db.objectStoreNames.contains('appState')) db.createObjectStore('appState')
       },
     })
   }
