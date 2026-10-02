@@ -354,7 +354,7 @@ const App = () => {
               <div className="capture-options">
                 <button className="mode-chip active" onClick={() => capture(true)} disabled={busy}>GPS capture</button>
                 <button className="mode-chip" onClick={() => capture(false)} disabled={busy}>No GPS</button>
-                <label className="mode-chip"><Icon name="upload" size={15} /> Import<input type="file" accept="image/*" hidden onChange={e => { const f=e.target.files?.[0]; if(f){setDraft({originalBlob:f,notes:'',captureDateTime:new Date().toISOString()}); stopStream(stream)}}}} /></label>
+                <label className="mode-chip"><Icon name="upload" size={15} /> Import<input type="file" accept="image/*" hidden onChange={e => { const f=e.target.files?.[0]; if(f){setDraft({originalBlob:f,notes:'',captureDateTime:new Date().toISOString()}); stopStream(stream)}}} /></label>
               </div>
             </div>
           </section>
