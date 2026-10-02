@@ -51,7 +51,7 @@ const presetProfiles: Record<string, Partial<OverlaySettings>> = {
 
 const accuracyLabel = (location?: LocationData): GpsStatus => location?.accuracy == null ? 'GPS READY' : `GPS ±${Math.round(location.accuracy)} m`
 
-const placeSummary = (p: LocationData) => {
+const placeSummary = (p: Pick<LocationData, 'placeName' | 'area' | 'locality' | 'city'>) => {
   const title = p.placeName || p.area || p.locality || p.city || 'Pinned location'
   const line = [p.area, p.city].filter(Boolean).filter((v, i, a) => a.findIndex(x => x?.toLowerCase() === v?.toLowerCase()) === i && v?.toLowerCase() !== title.toLowerCase()).join(' · ')
   return { title, line }
@@ -244,7 +244,7 @@ const App = () => {
         thumbnailBlob,
         createdAt: new Date().toISOString(),
         captureDateTime: draft.captureDateTime,
-        ...(draft.location || {}),
+        ...(draft.location || { timestamp: draft.captureDateTime }),
         notes: draft.notes,
         hasLocation: Boolean(draft.location),
         overlayPreset: overlay.preset,
