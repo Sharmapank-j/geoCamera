@@ -1,5 +1,5 @@
 import type { AppSettings, LocationData, OverlaySettings } from '../types'
-import { formatDate, formatTime } from '../utils/date'
+import { displayDatePretty, formatTime } from '../utils/date'
 
 interface StampInput {
   imageBlob: Blob
@@ -7,6 +7,7 @@ interface StampInput {
   notes?: string
   overlay: OverlaySettings
   appSettings: AppSettings
+  captureTimestamp?: string
 }
 
 type DrawableImage = ImageBitmap | HTMLImageElement
@@ -30,57 +31,232 @@ const getDimensions = (img: DrawableImage) => {
   return { width: img.width, height: img.height }
 }
 
+const loadImage = async (url: string): Promise<HTMLImageElement> =>
+  await new Promise((resolve, reject) => {
+    const img = new Image()
+    const timer = window.setTimeout(() => reject(new Error('timeout')), 2200)
+    img.crossOrigin = 'anonymous'
+    img.referrerPolicy = 'no-referrer'
+    img.decoding = 'async'
+    img.onload = () => {
+      window.clearTimeout(timer)
+      resolve(img)
+    }
+    img.onerror = () => {
+      window.clearTimeout(timer)
+      reject(new Error('failed'))
+    }
+    img.src = url
+  }) as HTMLImageElement
+
+const toTilePoint = (latitude: number, longitude: number, zoom: number) => {
+  const latRad = (latitude * Math.PI) / 180
+  const n = 2 ** zoom
+  const x = ((longitude + 180) / 360) * n
+  const y =
+    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
+    n
+
+  return { x, y, n }
+}
+
+const drawMapTiles = async (
+  location: LocationData,
+  size: number,
+): Promise<HTMLCanvasElement | null> => {
+  const zoom = 15
+  const tileSize = 256
+  const mapCanvas = document.createElement('canvas')
+  mapCanvas.width = size
+  mapCanvas.height = size
+  const mapCtx = mapCanvas.getContext('2d')
+  if (!mapCtx) return null
+
+  mapCtx.fillStyle = '#dbeafe'
+  mapCtx.fillRect(0, 0, size, size)
+
+  const { x, y, n } = toTilePoint(location.latitude, location.longitude, zoom)
+  const worldX = x * tileSize
+  const worldY = y * tileSize
+  const topLeftX = worldX - size / 2
+  const topLeftY = worldY - size / 2
+
+  const minTileX = Math.floor(topLeftX / tileSize)
+  const minTileY = Math.floor(topLeftY / tileSize)
+  const maxTileX = Math.floor((topLeftX + size) / tileSize)
+  const maxTileY = Math.floor((topLeftY + size) / tileSize)
+
+  const draws: Array<Promise<void>> = []
+  let loadedTiles = 0
+
+  for (let tileY = minTileY; tileY <= maxTileY; tileY += 1) {
+    if (tileY < 0 || tileY >= n) continue
+    for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
+      const wrappedX = ((tileX % n) + n) % n
+      const url = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${tileY}.png`
+      const drawTask = loadImage(url)
+        .then((img) => {
+          const dx = tileX * tileSize - topLeftX
+          const dy = tileY * tileSize - topLeftY
+          mapCtx.drawImage(img, dx, dy, tileSize, tileSize)
+          loadedTiles += 1
+        })
+        .catch(() => {})
+      draws.push(drawTask)
+    }
+  }
+
+  await Promise.all(draws)
+  if (loadedTiles === 0) return null
+
+  try {
+    mapCtx.getImageData(0, 0, 1, 1)
+  } catch {
+    return null
+  }
+
+  return mapCanvas
+}
+
+const drawMarker = (
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+) => {
+  const pinX = x + size * 0.5
+  const pinY = y + size * 0.52
+  const radius = Math.max(6, size * 0.07)
+
+  ctx.fillStyle = 'rgba(220,38,38,0.24)'
+  ctx.beginPath()
+  ctx.arc(pinX, pinY + radius * 1.2, radius * 1.2, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = '#ef4444'
+  ctx.beginPath()
+  ctx.moveTo(pinX, pinY + radius * 1.4)
+  ctx.arc(pinX, pinY, radius, 0, Math.PI * 2)
+  ctx.fill()
+
+  ctx.fillStyle = '#fff'
+  ctx.beginPath()
+  ctx.arc(pinX, pinY, Math.max(2, radius * 0.38), 0, Math.PI * 2)
+  ctx.fill()
+}
+
 const drawMapFallback = (
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   size: number,
-  location?: LocationData,
+  location: LocationData,
 ) => {
   ctx.save()
-  const gradient = ctx.createLinearGradient(x, y, x + size, y + size)
-  gradient.addColorStop(0, '#eef2ff')
-  gradient.addColorStop(1, '#dbeafe')
-  ctx.fillStyle = gradient
+  const fallback = ctx.createLinearGradient(x, y, x + size, y + size)
+  fallback.addColorStop(0, '#12233f')
+  fallback.addColorStop(1, '#1d3557')
+  ctx.fillStyle = fallback
   ctx.fillRect(x, y, size, size)
 
-  ctx.strokeStyle = 'rgba(30,41,59,0.15)'
-  for (let i = 1; i < 8; i += 1) {
-    const g = x + (size / 8) * i
-    const gy = y + (size / 8) * i
-    ctx.beginPath()
-    ctx.moveTo(g, y)
-    ctx.lineTo(g, y + size)
-    ctx.stroke()
-    ctx.beginPath()
-    ctx.moveTo(x, gy)
-    ctx.lineTo(x + size, gy)
-    ctx.stroke()
-  }
+  ctx.fillStyle = 'rgba(255,255,255,0.1)'
+  ctx.fillRect(x + size * 0.18, y + size * 0.16, size * 0.64, 1)
+  ctx.fillRect(x + size * 0.18, y + size * 0.82, size * 0.64, 1)
 
-  const pinX = x + size * 0.6
-  const pinY = y + size * 0.44
-  ctx.fillStyle = '#ef4444'
-  ctx.beginPath()
-  ctx.arc(pinX, pinY, size * 0.14, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.fillStyle = '#111827'
-  ctx.beginPath()
-  ctx.arc(pinX, pinY, size * 0.05, 0, Math.PI * 2)
-  ctx.fill()
+  ctx.font = `700 ${Math.max(18, size * 0.18)}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('📍', x + size / 2, y + size * 0.42)
 
-  if (location) {
-    ctx.fillStyle = '#0f172a'
-    ctx.font = `${Math.max(12, size * 0.08)}px Inter, system-ui, sans-serif`
-    ctx.textBaseline = 'bottom'
-    ctx.fillText(
-      `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`,
-      x + 8,
-      y + size - 8,
-    )
-  }
+  ctx.font = `600 ${Math.max(10, size * 0.08)}px Inter, system-ui, sans-serif`
+  ctx.fillText(
+    `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`,
+    x + size / 2,
+    y + size * 0.74,
+  )
 
   ctx.restore()
+}
+
+const unique = (parts: Array<string | undefined>) => {
+  const out: string[] = []
+  for (const part of parts) {
+    const next = part?.trim()
+    if (!next) continue
+    const exists = out.some((item) => item.toLowerCase() === next.toLowerCase())
+    if (!exists) out.push(next)
+  }
+  return out
+}
+
+const pickLocationText = (location: LocationData) => {
+  const fallbackParts = unique([
+    location.locality,
+    location.city,
+    location.district,
+    location.state,
+    location.country,
+  ])
+
+  const title =
+    location.placeName?.trim() ||
+    location.locality?.trim() ||
+    location.city?.trim() ||
+    location.district?.trim() ||
+    location.state?.trim() ||
+    location.country?.trim() ||
+    ''
+
+  const remaining = fallbackParts.filter(
+    (part) => part.toLowerCase() !== title.toLowerCase(),
+  )
+
+  if (remaining.length < 2 && location.address) {
+    const fromAddress = location.address
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+    for (const part of fromAddress) {
+      if (!remaining.some((item) => item.toLowerCase() === part.toLowerCase())) {
+        remaining.push(part)
+      }
+      if (remaining.length >= 4) break
+    }
+  }
+
+  return {
+    title,
+    lineOne: remaining.slice(0, 2).join(', '),
+    lineTwo: remaining.slice(2, 4).join(', '),
+  }
+}
+
+const wrapText = (
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+  maxLines: number,
+) => {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (words.length === 0) return []
+  const lines: string[] = []
+  let current = words[0]
+
+  for (let i = 1; i < words.length; i += 1) {
+    const candidate = `${current} ${words[i]}`
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate
+      continue
+    }
+    lines.push(current)
+    current = words[i]
+    if (lines.length === maxLines - 1) break
+  }
+
+  if (lines.length < maxLines) lines.push(current)
+  if (lines.length > maxLines) lines.length = maxLines
+  return lines
 }
 
 export const renderStampedPhoto = async ({
@@ -89,6 +265,7 @@ export const renderStampedPhoto = async ({
   notes,
   overlay,
   appSettings,
+  captureTimestamp,
 }: StampInput): Promise<Blob> => {
   const source = await blobToImageBitmap(imageBlob)
   const { width, height } = getDimensions(source)
@@ -102,84 +279,175 @@ export const renderStampedPhoto = async ({
   ctx.drawImage(source as CanvasImageSource, 0, 0, width, height)
 
   if (location) {
-    const panelHeight = Math.max(height * 0.22, 220)
+    const isPortrait = height >= width
     const panelWidth = Math.min(width * overlay.panelWidth, width - 24)
     const panelX = (width - panelWidth) / 2
-    const panelY = height - panelHeight - 12
+    const panelY = height - 12
+
+    const base = Math.max(12, width * 0.016 * (overlay.fontSize / 18))
+    const pad = Math.max(10, base * 0.62)
+    const titleHeight = Math.max(base * 1.9, 28)
+    const mapSizeLimit = isPortrait ? panelWidth * 0.26 : panelWidth * 0.2
+    const mapSize = overlay.showMap ? Math.max(86, Math.min(152, mapSizeLimit)) : 0
+    const leftColumnWidth = Math.max(140, panelWidth - pad * 3 - mapSize)
+
+    const locationText = pickLocationText(location)
+    const captureIso = captureTimestamp ?? location.timestamp
+
+    const details: string[] = []
+    if (overlay.showLatitude) {
+      details.push(`Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
+    }
+    if (overlay.showLongitude) {
+      details.push(`Longitude: ${location.longitude.toFixed(overlay.coordinatePrecision)}`)
+    }
+    if (overlay.showDate) details.push(`Date: ${displayDatePretty(captureIso)}`)
+    if (overlay.showTime) {
+      details.push(`Time: ${formatTime(captureIso, appSettings.use24Hour)}`)
+    }
+    if (overlay.showAccuracy && location.accuracy != null) {
+      details.push(`Accuracy: ±${Math.round(location.accuracy)} m`)
+    }
+    if (overlay.showAltitude && location.altitude != null) {
+      details.push(`Altitude: ${Math.round(location.altitude)} m`)
+    }
+    if (overlay.showNotes && notes?.trim()) details.push(`Notes: ${notes.trim()}`)
+
+    const headingLines: Array<{ text: string; size: number; weight: number; dim?: boolean }> = []
+
+    if (overlay.showLocationName && locationText.title) {
+      headingLines.push({ text: locationText.title, size: base * 1.2, weight: 700 })
+    }
+
+    if (overlay.showAddress && locationText.lineOne) {
+      headingLines.push({ text: locationText.lineOne, size: base * 0.88, weight: 600, dim: true })
+    }
+
+    if (overlay.showAddress && locationText.lineTwo) {
+      headingLines.push({ text: locationText.lineTwo, size: base * 0.88, weight: 600, dim: true })
+    }
+
+    if (!headingLines.length) {
+      headingLines.push({ text: 'GPS Coordinates', size: base * 1.02, weight: 700 })
+    }
+
+    const lineGap = Math.max(5, base * 0.22)
+    const sectionGap = Math.max(6, base * 0.38)
+
+    const measured: Array<{ text: string; size: number; weight: number; dim?: boolean }> = []
+    for (const line of headingLines) {
+      ctx.font = `${line.weight} ${Math.round(line.size)}px Inter, system-ui, sans-serif`
+      const wrapped = wrapText(ctx, line.text, leftColumnWidth, line.size > base ? 2 : 1)
+      for (const textLine of wrapped) {
+        measured.push({ ...line, text: textLine })
+      }
+    }
+
+    const detailsToDraw = details.slice(0, isPortrait ? 6 : 5)
+
+    const headingHeight = measured.reduce((sum, line) => sum + line.size + lineGap, 0)
+    const detailLineHeight = base * 0.88 + lineGap
+    const detailsHeight = detailsToDraw.length * detailLineHeight
+    const textHeight = headingHeight + sectionGap + detailsHeight
+    const bodyHeight = Math.max(textHeight, mapSize)
+
+    const maxPanelHeight = Math.max(160, Math.min(height * (isPortrait ? 0.33 : 0.4), height - 20))
+    let panelHeight = titleHeight + bodyHeight + pad * 1.3
+
+    while (panelHeight > maxPanelHeight && detailsToDraw.length > 3) {
+      detailsToDraw.pop()
+      panelHeight -= detailLineHeight
+    }
+
+    panelHeight = Math.min(panelHeight, maxPanelHeight)
+    const finalPanelY = panelY - panelHeight
 
     ctx.save()
     ctx.globalAlpha = overlay.opacity
-    ctx.fillStyle = '#111827'
+    const panelGradient = ctx.createLinearGradient(panelX, finalPanelY, panelX, finalPanelY + panelHeight)
+    panelGradient.addColorStop(0, '#0e1f39')
+    panelGradient.addColorStop(1, '#101826')
+    ctx.fillStyle = panelGradient
     ctx.beginPath()
-    ctx.roundRect(panelX, panelY, panelWidth, panelHeight, overlay.cornerRadius)
+    ctx.roundRect(panelX, finalPanelY, panelWidth, panelHeight, overlay.cornerRadius)
     ctx.fill()
 
-    const titleHeight = Math.max(42, panelHeight * 0.16)
-    ctx.fillStyle = 'rgba(31,41,55,0.95)'
+    ctx.fillStyle = 'rgba(8,16,31,0.94)'
     ctx.beginPath()
-    ctx.roundRect(panelX, panelY, panelWidth, titleHeight, [overlay.cornerRadius, overlay.cornerRadius, 0, 0])
+    ctx.roundRect(
+      panelX,
+      finalPanelY,
+      panelWidth,
+      titleHeight,
+      [overlay.cornerRadius, overlay.cornerRadius, 0, 0],
+    )
     ctx.fill()
 
     ctx.globalAlpha = 1
-    const base = Math.max(18, width * 0.024 * (overlay.fontSize / 18))
-    const pad = Math.max(18, base)
-    const leftX = panelX + pad
-    const mapSize = Math.min(panelHeight - titleHeight - pad, panelWidth * overlay.mapSize)
-    const mapX = panelX + panelWidth - mapSize - pad
-    const mapY = panelY + titleHeight + pad * 0.6
+    const textLeft = panelX + pad
+    const contentTop = finalPanelY + titleHeight + pad * 0.66
 
-    ctx.textAlign = overlay.textAlign
-    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'left'
+    ctx.textBaseline = 'alphabetic'
 
-    let cursorY = panelY + titleHeight * 0.68
     if (overlay.showTitle) {
-      ctx.font = `${Math.round(base * 0.95)}px Inter, system-ui, sans-serif`
-      ctx.fillText('GPS MAP CAMERA', leftX, cursorY)
+      ctx.font = `700 ${Math.round(base * 0.86)}px Inter, system-ui, sans-serif`
+      ctx.fillStyle = '#f8fafc'
+      ctx.fillText('GPS MAP CAMERA', textLeft, finalPanelY + titleHeight * 0.68)
     }
 
-    cursorY = panelY + titleHeight + base * 1.2
-    ctx.font = `700 ${Math.round(base * 1.45)}px Inter, system-ui, sans-serif`
-    if (overlay.showLocationName) {
-      ctx.fillText(location.placeName ?? 'LOCATION', leftX, cursorY)
-      cursorY += base * 1.35 * overlay.spacing
+    let cursorY = contentTop
+    for (const line of measured) {
+      ctx.font = `${line.weight} ${Math.round(line.size)}px Inter, system-ui, sans-serif`
+      ctx.fillStyle = line.dim ? 'rgba(241,245,249,0.94)' : '#ffffff'
+      cursorY += line.size
+      ctx.fillText(line.text, textLeft, cursorY)
+      cursorY += lineGap
     }
 
-    ctx.font = `600 ${Math.round(base * 1.05)}px Inter, system-ui, sans-serif`
-    if (overlay.showAddress && location.address) {
-      const addressText = location.address.slice(0, 52)
-      ctx.fillText(addressText, leftX, cursorY)
-      cursorY += base * 1.2 * overlay.spacing
+    cursorY += sectionGap * 0.5
+    if (detailsToDraw.length > 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(textLeft, cursorY)
+      ctx.lineTo(textLeft + leftColumnWidth, cursorY)
+      ctx.stroke()
+      cursorY += sectionGap
     }
 
-    const details: string[] = []
-    if (overlay.showLatitude) details.push(`Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
-    if (overlay.showLongitude) details.push(`Longitude: ${location.longitude.toFixed(overlay.coordinatePrecision)}`)
-    if (overlay.showDate) details.push(`Date: ${formatDate(location.timestamp, appSettings)}`)
-    if (overlay.showTime) details.push(`Time: ${formatTime(location.timestamp, appSettings.use24Hour)}`)
-    if (overlay.showAccuracy && location.accuracy) details.push(`Accuracy: ±${Math.round(location.accuracy)} m`)
-    if (overlay.showAltitude && location.altitude) details.push(`Altitude: ${location.altitude.toFixed(1)} m`)
-    if (overlay.showHeading && location.heading) details.push(`Heading: ${Math.round(location.heading)}°`)
-    if (overlay.showSpeed && location.speed) details.push(`Speed: ${(location.speed * 3.6).toFixed(1)} km/h`)
-    if (overlay.showNotes && notes) details.push(`Notes: ${notes}`)
-
-    ctx.font = `600 ${Math.round(base * 1.1)}px Inter, system-ui, sans-serif`
-    for (const line of details.slice(0, 6)) {
-      if (cursorY > panelY + panelHeight - base) break
-      ctx.fillText(line, leftX, cursorY)
-      cursorY += base * 1.25 * overlay.spacing
+    ctx.font = `600 ${Math.round(base * 0.88)}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = '#f8fafc'
+    for (const line of detailsToDraw) {
+      cursorY += base * 0.88
+      ctx.fillText(line, textLeft, cursorY)
+      cursorY += lineGap
     }
 
-    if (overlay.showMap) {
+    if (overlay.showMap && mapSize > 0) {
+      const mapX = panelX + panelWidth - mapSize - pad
+      const mapY = finalPanelY + titleHeight + pad * 0.6
+      const mapRadius = Math.max(12, overlay.cornerRadius * 0.55)
+
       ctx.save()
       ctx.beginPath()
-      ctx.roundRect(mapX, mapY, mapSize, mapSize, Math.max(16, overlay.cornerRadius * 0.8))
+      ctx.roundRect(mapX, mapY, mapSize, mapSize, mapRadius)
       ctx.clip()
-      drawMapFallback(ctx, mapX, mapY, mapSize, location)
+
+      const mapCanvas = await drawMapTiles(location, Math.round(mapSize))
+      if (mapCanvas) {
+        ctx.drawImage(mapCanvas, mapX, mapY, mapSize, mapSize)
+        drawMarker(ctx, mapX, mapY, mapSize)
+      } else {
+        drawMapFallback(ctx, mapX, mapY, mapSize, location)
+      }
+
       ctx.restore()
-      ctx.strokeStyle = 'rgba(255,255,255,0.3)'
-      ctx.lineWidth = 2
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.34)'
+      ctx.lineWidth = 1.5
       ctx.beginPath()
-      ctx.roundRect(mapX, mapY, mapSize, mapSize, Math.max(16, overlay.cornerRadius * 0.8))
+      ctx.roundRect(mapX, mapY, mapSize, mapSize, mapRadius)
       ctx.stroke()
     }
 
@@ -187,7 +455,7 @@ export const renderStampedPhoto = async ({
   }
 
   return await new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob ?? imageBlob), 'image/jpeg', 0.94)
+    canvas.toBlob((blob) => resolve(blob ?? imageBlob), 'image/jpeg', 0.95)
   })
 }
 

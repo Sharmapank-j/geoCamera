@@ -122,6 +122,7 @@ const App = () => {
         notes: draft.notes,
         overlay,
         appSettings: settings,
+        captureTimestamp: draft.captureDateTime,
       })
       setStampedBlob(stamped)
     }
@@ -283,6 +284,26 @@ const App = () => {
 
     const blob = await zip.generateAsync({ type: 'blob' })
     downloadBlob(blob, `GeoTagCamera-Backup-${new Date().toISOString().slice(0, 10)}.zip`)
+  }
+
+  const sharePhoto = async (photo: PhotoRecord) => {
+    const lastModified = new Date(photo.captureDateTime).getTime() || Date.now()
+    const file = new File([photo.finalBlob], photo.fileName, {
+      type: photo.finalBlob.type || 'image/jpeg',
+      lastModified,
+    })
+
+    try {
+      if (!navigator.share) throw new Error('share-unavailable')
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: photo.fileName })
+        return
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+    }
+
+    downloadBlob(photo.finalBlob, photo.fileName)
   }
 
   const importBackup = async (file: File) => {
@@ -481,11 +502,7 @@ const App = () => {
                       <div className="grid grid-cols-2 gap-1 mt-2">
                         <button className="h-8 rounded bg-slate-100" onClick={() => downloadBlob(photo.finalBlob, photo.fileName)}>Download</button>
                         <button className="h-8 rounded bg-slate-100" onClick={async () => {
-                          if (navigator.share && navigator.canShare?.({ files: [new File([photo.finalBlob], photo.fileName)] })) {
-                            await navigator.share({ files: [new File([photo.finalBlob], photo.fileName)], title: photo.fileName })
-                          } else {
-                            downloadBlob(photo.finalBlob, photo.fileName)
-                          }
+                          await sharePhoto(photo)
                         }}>Share</button>
                         <button className="h-8 rounded bg-slate-100" onClick={() => downloadBlob(new Blob([JSON.stringify(photo, null, 2)], { type: 'application/json' }), `${photo.id}.json`)}>Metadata</button>
                         <button className="h-8 rounded bg-red-100 text-red-700" onClick={async () => {
