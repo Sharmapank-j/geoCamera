@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import JSZip from 'jszip'
 import { captureVideoFrame, stopStream } from './camera/capture'
 import { getCurrentLocation } from './location/geolocation'
@@ -9,104 +9,52 @@ import type { AppSettings, CameraFacing, GpsStatus, LocationData, OverlayPreset,
 import { defaultAppSettings, defaultOverlaySettings } from './types'
 import { displayDatePretty } from './utils/date'
 import { buildPhotoFilename, downloadBlob } from './utils/file'
+import './App.css'
 
 type Tab = 'camera' | 'gallery' | 'map' | 'settings'
+type IconName = 'camera' | 'image' | 'map' | 'settings' | 'refresh' | 'switch' | 'flash' | 'location' | 'download' | 'share' | 'trash' | 'edit' | 'x' | 'check' | 'search' | 'info' | 'upload'
 
-interface DraftPhoto {
-  originalBlob: Blob
-  location?: LocationData
-  notes: string
-  captureDateTime: string
+const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
+  const paths: Record<IconName, string> = {
+    camera: 'M4 7h3l1.5-2h7L17 7h3v11H4V7Zm8 3.2a3.3 3.3 0 1 0 0 6.6 3.3 3.3 0 0 0 0-6.6Z',
+    image: 'M4 5h16v14H4V5Zm2 11 3.2-3.4 2.6 2.5 2.2-2.3L18 17H6Zm3-6.8a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z',
+    map: 'M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6Zm6 0v12m6-9v12',
+    settings: 'M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Zm0-5 1 2.1 2.2.5 1.8-1.4 1.8 1.8-1.4 1.8.5 2.2 2.1 1v2.6l-2.1 1-.5 2.2 1.4 1.8-1.8 1.8-1.8-1.4-2.2.5-1 2.1h-2.6l-1-2.1-2.2-.5-1.8 1.4-1.8-1.8 1.4-1.8-.5-2.2-2.1-1V11l2.1-1 .5-2.2-1.4-1.8L6.1 4.2l1.8 1.4 2.2-.5 1-2.1H12Z',
+    refresh: 'M20 11a8 8 0 0 0-14.9-3L3 10m0 0V5m0 5h5M4 13a8 8 0 0 0 14.9 3L21 14m0 0v5m0-5h-5',
+    switch: 'M8 7h11m0 0-3-3m3 3-3 3M16 17H5m0 0 3 3m-3-3 3-3',
+    flash: 'm13 2-8 11h6l-1 9 8-13h-6l1-7Z',
+    location: 'M20 10c0 5-8 11-8 11S4 15 4 10a8 8 0 1 1 16 0Zm-5 0a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+    download: 'M12 3v12m0 0 4-4m-4 4-4-4M4 21h16',
+    share: 'M14 5h5v5M19 5l-9 9M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5',
+    trash: 'M4 7h16m-10 4v6m4-6v6M9 7V4h6v3m-9 0 1 14h10l1-14',
+    edit: 'M4 20h4L19 9l-4-4L4 16v4Zm9-13 4 4',
+    x: 'M5 5l14 14M19 5 5 19',
+    check: 'm5 12 4 4L19 6',
+    search: 'm20 20-4.5-4.5M9.5 17a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z',
+    info: 'M12 17v-5m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
+    upload: 'M12 16V4m0 0L8 8m4-4 4 4M5 20h14',
+  }
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>
 }
 
-const presets: OverlayPreset[] = ['Classic GPS', 'Minimal', 'Compact', 'Evidence', 'Travel', 'Custom']
+const presets: OverlayPreset[] = ['Classic GPS', 'Modern', 'Minimal', 'Compact', 'Evidence', 'Travel', 'Professional', 'Custom']
 
-const presetProfiles: Record<Exclude<OverlayPreset, 'Custom'>, Partial<OverlaySettings>> = {
-  'Classic GPS': {
-    showTitle: true,
-    showLocationName: true,
-    showAddress: true,
-    showLatitude: true,
-    showLongitude: true,
-    showDate: true,
-    showTime: true,
-    showAccuracy: true,
-    showAltitude: true,
-    showHeading: true,
-    showSpeed: true,
-    showMap: true,
-    opacity: 0.84,
-    panelWidth: 0.98,
-    cornerRadius: 20,
-  },
-  Minimal: {
-    showTitle: false,
-    showLocationName: true,
-    showAddress: false,
-    showLatitude: true,
-    showLongitude: true,
-    showDate: true,
-    showTime: true,
-    showAccuracy: false,
-    showAltitude: false,
-    showHeading: false,
-    showSpeed: false,
-    showMap: false,
-    opacity: 0.78,
-    panelWidth: 0.9,
-    cornerRadius: 14,
-  },
-  Compact: {
-    showTitle: false,
-    showLocationName: true,
-    showAddress: false,
-    showLatitude: true,
-    showLongitude: true,
-    showDate: true,
-    showTime: true,
-    showAccuracy: true,
-    showAltitude: false,
-    showHeading: false,
-    showSpeed: false,
-    showMap: false,
-    opacity: 0.82,
-    panelWidth: 0.92,
-    cornerRadius: 14,
-  },
-  Evidence: {
-    showTitle: true,
-    showLocationName: true,
-    showAddress: true,
-    showLatitude: true,
-    showLongitude: true,
-    showDate: true,
-    showTime: true,
-    showAccuracy: true,
-    showAltitude: true,
-    showHeading: true,
-    showSpeed: true,
-    showMap: true,
-    opacity: 0.9,
-    panelWidth: 0.99,
-    cornerRadius: 12,
-  },
-  Travel: {
-    showTitle: true,
-    showLocationName: true,
-    showAddress: true,
-    showLatitude: true,
-    showLongitude: true,
-    showDate: true,
-    showTime: true,
-    showAccuracy: true,
-    showAltitude: false,
-    showHeading: false,
-    showSpeed: false,
-    showMap: true,
-    opacity: 0.8,
-    panelWidth: 0.96,
-    cornerRadius: 22,
-  },
+const presetProfiles: Record<string, Partial<OverlaySettings>> = {
+  'Classic GPS': { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .9, panelWidth: .94 },
+  Modern: { showTitle: true, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .86, panelWidth: .9, cornerRadius: 24 },
+  Minimal: { showTitle: false, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: false, showMap: false, opacity: .78, panelWidth: .88 },
+  Compact: { showTitle: false, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: false, opacity: .82, panelWidth: .9 },
+  Evidence: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showAltitude: true, showHeading: true, showSpeed: true, showMap: true, opacity: .93, panelWidth: .97 },
+  Travel: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .84, panelWidth: .94, cornerRadius: 22 },
+  Professional: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showAltitude: true, showMap: true, opacity: .94, panelWidth: .96, cornerRadius: 12 },
+}
+
+const accuracyLabel = (location?: LocationData) => location?.accuracy == null ? 'GPS READY' : `GPS ±${Math.round(location.accuracy)} m`
+
+const placeSummary = (p: LocationData) => {
+  const title = p.placeName || p.area || p.locality || p.city || 'Pinned location'
+  const line = [p.area, p.city].filter(Boolean).filter((v, i, a) => a.findIndex(x => x?.toLowerCase() === v?.toLowerCase()) === i && v?.toLowerCase() !== title.toLowerCase()).join(' · ')
+  return { title, line }
 }
 
 const App = () => {
@@ -115,81 +63,54 @@ const App = () => {
   const [overlay, setOverlay] = useState<OverlaySettings>(defaultOverlaySettings)
   const [photos, setPhotos] = useState<PhotoRecord[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('camera')
-
   const [cameraPermission, setCameraPermission] = useState<PermissionStateLabel>('Not granted')
   const [locationPermission, setLocationPermission] = useState<PermissionStateLabel>('Not granted')
   const [storagePermission, setStoragePermission] = useState<StorageStateLabel>('Available')
-
   const [cameraError, setCameraError] = useState('')
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('LOCATION OFF')
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [facing, setFacing] = useState<CameraFacing>('environment')
+  const [torch, setTorch] = useState(false)
+  const [draft, setDraft] = useState<{ originalBlob: Blob; location?: LocationData; notes: string; captureDateTime: string } | null>(null)
+  const [stampedBlob, setStampedBlob] = useState<Blob | null>(null)
+  const [selectedPhoto, setSelectedPhoto] = useState<PhotoRecord | null>(null)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<'all' | 'geo' | 'no-geo'>('all')
+  const [busy, setBusy] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement>(null)
 
-  const [draft, setDraft] = useState<DraftPhoto | null>(null)
-  const [stampedBlob, setStampedBlob] = useState<Blob | null>(null)
-
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState<'all' | 'geo' | 'no-geo'>('all')
-
   const refreshPhotos = async () => setPhotos(await getPhotos())
 
-  const applyOverlayPreset = (preset: OverlayPreset) => {
-    setOverlay((current) => {
-      if (preset === 'Custom') {
-        return { ...current, preset }
-      }
+  const setSavedSettings = async (next: AppSettings) => { setSettings(next); await saveSettings(next) }
 
-      const profile = presetProfiles[preset]
-      return {
-        ...current,
-        ...profile,
-        preset,
-        coordinatePrecision: settings.coordinatePrecision,
-      }
-    })
-  }
-
-  const checkPermissionState = async (name: PermissionName): Promise<PermissionStateLabel> => {
+  const checkPermission = async (name: PermissionName): Promise<PermissionStateLabel> => {
     try {
       const status = await navigator.permissions.query({ name } as PermissionDescriptor)
-      if (status.state === 'granted') return 'Allowed'
-      if (status.state === 'denied') return 'Denied'
-      return 'Not granted'
-    } catch {
-      return 'Not granted'
-    }
+      return status.state === 'granted' ? 'Allowed' : status.state === 'denied' ? 'Denied' : 'Not granted'
+    } catch { return 'Not granted' }
   }
 
-  const checkStorageState = async () => {
-    if (!navigator.storage?.persisted) {
-      setStoragePermission('Limited')
-      return
-    }
-    const persisted = await navigator.storage.persisted()
-    setStoragePermission(persisted ? 'Persistent' : 'Available')
+  const refreshStorageStatus = async () => {
+    if (!navigator.storage?.persisted) return setStoragePermission('Limited')
+    setStoragePermission((await navigator.storage.persisted()) ? 'Persistent' : 'Available')
   }
 
-  const startCamera = async (targetFacing: CameraFacing) => {
+  const startCamera = async (target: CameraFacing = facing) => {
     stopStream(stream)
     try {
       const media = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: targetFacing },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
-        },
+        video: { facingMode: { ideal: target }, width: { ideal: 1920 }, height: { ideal: 1080 } },
         audio: false,
       })
+      setStream(media)
+      setFacing(target)
       setCameraPermission('Allowed')
       setCameraError('')
-      setStream(media)
-      setFacing(targetFacing)
       if (videoRef.current) videoRef.current.srcObject = media
     } catch {
       setCameraPermission('Denied')
-      setCameraError('Camera unavailable or denied. Enable camera in browser settings.')
+      setCameraError('Camera unavailable. Check browser permission and use HTTPS.')
     }
   }
 
@@ -198,10 +119,11 @@ const App = () => {
     const loaded = await getSettings()
     setSettings(loaded)
     setFacing(loaded.defaultCamera)
+    setOverlay({ ...defaultOverlaySettings, preset: loaded.defaultPreset, coordinatePrecision: loaded.coordinatePrecision })
     await refreshPhotos()
-    setCameraPermission(await checkPermissionState('camera'))
-    setLocationPermission(await checkPermissionState('geolocation'))
-    await checkStorageState()
+    setCameraPermission(await checkPermission('camera'))
+    setLocationPermission(await checkPermission('geolocation'))
+    await refreshStorageStatus()
     setReady(true)
   }
 
@@ -212,531 +134,323 @@ const App = () => {
   }, [])
 
   useEffect(() => {
-    if (ready && settings.setupComplete && activeTab === 'camera') startCamera(facing)
+    if (ready && settings.setupComplete && activeTab === 'camera' && !draft) startCamera(facing)
     return () => stopStream(stream)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, settings.setupComplete, activeTab, facing])
+  }, [ready, settings.setupComplete, activeTab, draft])
 
   useEffect(() => {
-    const updatePreview = async () => {
-      if (!draft) return
-      const stamped = await renderStampedPhoto({
-        imageBlob: draft.originalBlob,
-        location: draft.location,
-        notes: draft.notes,
-        overlay,
-        appSettings: settings,
-        captureTimestamp: draft.captureDateTime,
-      })
-      setStampedBlob(stamped)
+    let cancelled = false
+    const update = async () => {
+      if (!draft) { setStampedBlob(null); return }
+      const blob = await renderStampedPhoto({ imageBlob: draft.originalBlob, location: draft.location, notes: draft.notes, overlay, appSettings: settings, captureTimestamp: draft.captureDateTime })
+      if (!cancelled) setStampedBlob(blob)
     }
-    updatePreview()
+    update()
+    return () => { cancelled = true }
   }, [draft, overlay, settings])
 
   useEffect(() => {
-    const drawPreview = async () => {
-      if (!stampedBlob || !previewCanvasRef.current) return
-      const bitmap = await createImageBitmap(stampedBlob)
-      const canvas = previewCanvasRef.current
-      const maxWidth = canvas.parentElement?.clientWidth ?? bitmap.width
-      const ratio = maxWidth / bitmap.width
+    if (!stampedBlob || !previewCanvasRef.current) return
+    createImageBitmap(stampedBlob).then(bitmap => {
+      const canvas = previewCanvasRef.current!
+      const max = canvas.parentElement?.clientWidth || bitmap.width
+      const ratio = Math.min(1, max / bitmap.width)
       canvas.width = Math.round(bitmap.width * ratio)
       canvas.height = Math.round(bitmap.height * ratio)
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    }
-
-    drawPreview()
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      bitmap.close()
+    })
   }, [stampedBlob])
 
   const continueSetup = async () => {
+    setBusy(true)
     try {
-      await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      setCameraPermission('Allowed')
-    } catch {
-      setCameraPermission('Denied')
-    }
+      try {
+        const media = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+        media.getTracks().forEach(t => t.stop())
+        setCameraPermission('Allowed')
+      } catch { setCameraPermission('Denied') }
+      try {
+        await getCurrentLocation(7000)
+        setLocationPermission('Allowed')
+      } catch (e) {
+        setLocationPermission(String(e).includes('DENIED') ? 'Denied' : 'Not granted')
+      }
+      if (navigator.storage?.persist) setStoragePermission(await navigator.storage.persist() ? 'Persistent' : 'Available')
+      const next = { ...settings, setupComplete: true }
+      await setSavedSettings(next)
+    } finally { setBusy(false) }
+  }
 
+  const resolveLocation = async (): Promise<LocationData | undefined> => {
+    setGpsStatus('LOCATING...')
     try {
-      await getCurrentLocation(7000)
+      const location = await getCurrentLocation(settings.locationTimeoutMs, { highAccuracy: settings.locationHighAccuracy, minimumAccuracy: settings.lowAccuracyThresholdM })
+      let enriched = location
+      if (settings.addressLookup && settings.allowExternalGeocoder && navigator.onLine) enriched = await reverseGeocode(location)
       setLocationPermission('Allowed')
-    } catch (error) {
-      setLocationPermission(String(error).includes('DENIED') ? 'Denied' : 'Not granted')
+      setGpsStatus(location.accuracy != null && location.accuracy > settings.lowAccuracyThresholdM ? 'LOW ACCURACY' : accuracyLabel(location))
+      return enriched
+    } catch (e) {
+      const status = String(e)
+      setGpsStatus(status as GpsStatus)
+      if (status === 'LOCATION DENIED') setLocationPermission('Denied')
+      return undefined
     }
-
-    if (navigator.storage?.persist) {
-      const persisted = await navigator.storage.persist()
-      setStoragePermission(persisted ? 'Persistent' : 'Available')
-    }
-
-    await initDb()
-    const next = { ...settings, setupComplete: true }
-    setSettings(next)
-    await saveSettings(next)
   }
 
   const capture = async (withLocation: boolean) => {
-    if (!videoRef.current) return
+    if (!videoRef.current || busy) return
+    setBusy(true)
     let location: LocationData | undefined
-    if (withLocation) {
-      setGpsStatus('LOCATING...')
-      try {
-        location = await getCurrentLocation()
-        if (settings.addressLookup && settings.allowExternalGeocoder && navigator.onLine) {
-          location = await reverseGeocode(location)
-        }
-        setGpsStatus(location.accuracy ? `GPS ±${Math.round(location.accuracy)} m` : 'GPS READY')
-      } catch (error) {
-        const message = (error as Error).message as GpsStatus
-        setGpsStatus(message)
-      }
-    }
+    try {
+      if (withLocation) location = await resolveLocation()
+      const originalBlob = await captureVideoFrame(videoRef.current)
+      setDraft({ originalBlob, location, notes: '', captureDateTime: new Date().toISOString() })
+      stopStream(stream)
+      setStream(null)
+    } catch (e) {
+      setCameraError((e as Error).message || 'Capture failed')
+    } finally { setBusy(false) }
+  }
 
-    const originalBlob = await captureVideoFrame(videoRef.current)
-    setDraft({
-      originalBlob,
-      location,
-      notes: '',
-      captureDateTime: new Date().toISOString(),
-    })
-    stopStream(stream)
-    setStream(null)
+  const refreshLocation = async () => {
+    const loc = await resolveLocation()
+    if (draft && loc) setDraft({ ...draft, location: loc })
+  }
+
+  const toggleTorch = async () => {
+    const track = stream?.getVideoTracks()[0]
+    if (!track) return
+    const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean }
+    if (!capabilities.torch) { setCameraError('Torch is not supported by this camera.'); return }
+    try {
+      await track.applyConstraints({ advanced: [{ torch: !torch }] } as MediaTrackConstraints)
+      setTorch(!torch)
+    } catch { setCameraError('Torch could not be enabled on this device.') }
   }
 
   const saveDraft = async () => {
-    if (!draft || !stampedBlob) return
-    const thumbnailBlob = await createThumbnail(stampedBlob)
-    const fileName = buildPhotoFilename(draft.captureDateTime, draft.location?.latitude, draft.location?.longitude)
-    const photo: PhotoRecord = {
-      id: crypto.randomUUID(),
-      originalBlob: draft.originalBlob,
-      finalBlob: stampedBlob,
-      thumbnailBlob,
-      createdAt: new Date().toISOString(),
-      captureDateTime: draft.captureDateTime,
-      latitude: draft.location?.latitude,
-      longitude: draft.location?.longitude,
-      accuracy: draft.location?.accuracy,
-      altitude: draft.location?.altitude,
-      altitudeAccuracy: draft.location?.altitudeAccuracy,
-      heading: draft.location?.heading,
-      speed: draft.location?.speed,
-      gpsTimestamp: draft.location?.timestamp,
-      address: draft.location?.address,
-      locality: draft.location?.locality,
-      city: draft.location?.city,
-      district: draft.location?.district,
-      state: draft.location?.state,
-      country: draft.location?.country,
-      notes: draft.notes,
-      hasLocation: Boolean(draft.location),
-      overlayPreset: overlay.preset,
-      overlaySettings: overlay,
-      fileName,
-    }
-
-    await savePhoto(photo)
-    await refreshPhotos()
-    setDraft(null)
-    setStampedBlob(null)
-    setActiveTab('gallery')
+    if (!draft || !stampedBlob || busy) return
+    setBusy(true)
+    try {
+      const thumbnailBlob = await createThumbnail(stampedBlob)
+      const fileName = buildPhotoFilename(draft.captureDateTime, draft.location?.latitude, draft.location?.longitude)
+      await savePhoto({
+        id: crypto.randomUUID(),
+        originalBlob: draft.originalBlob,
+        finalBlob: stampedBlob,
+        thumbnailBlob,
+        createdAt: new Date().toISOString(),
+        captureDateTime: draft.captureDateTime,
+        ...(draft.location || {}),
+        notes: draft.notes,
+        hasLocation: Boolean(draft.location),
+        overlayPreset: overlay.preset,
+        overlaySettings: overlay,
+        fileName,
+      })
+      await refreshPhotos()
+      setDraft(null)
+      setStampedBlob(null)
+      setActiveTab('gallery')
+    } finally { setBusy(false) }
   }
 
   const exportAll = async () => {
     const zip = new JSZip()
-    const root = zip.folder('GeoTagCamera-Backup')
-    const photosFolder = root?.folder('photos')
-    const metadataFolder = root?.folder('metadata')
-
-    const metadata = photos.map((p) => ({
-      id: p.id,
-      captureDateTime: p.captureDateTime,
-      latitude: p.latitude,
-      longitude: p.longitude,
-      accuracy: p.accuracy,
-      altitude: p.altitude,
-      heading: p.heading,
-      speed: p.speed,
-      address: p.address,
-      notes: p.notes,
-      overlayPreset: p.overlayPreset,
-      overlaySettings: p.overlaySettings,
-      fileName: p.fileName,
-    }))
-
+    const root = zip.folder('GeoTagCamera-Backup')!
+    const photosFolder = root.folder('photos')!
+    const metadataFolder = root.folder('metadata')!
     for (const p of photos) {
-      photosFolder?.file(p.fileName, p.finalBlob)
-      metadataFolder?.file(`${p.id}.json`, JSON.stringify(metadata.find((m) => m.id === p.id), null, 2))
+      photosFolder.file(p.fileName, p.finalBlob)
+      metadataFolder.file(`${p.id}.json`, JSON.stringify(p, null, 2))
     }
-
-    root?.file(
-      'manifest.json',
-      JSON.stringify(
-        {
-          application: 'GeoTag Camera',
-          version: '1.0.0',
-          exportDate: new Date().toISOString(),
-          photoCount: photos.length,
-          schemaVersion: 1,
-        },
-        null,
-        2,
-      ),
-    )
-
-    const blob = await zip.generateAsync({ type: 'blob' })
-    downloadBlob(blob, `GeoTagCamera-Backup-${new Date().toISOString().slice(0, 10)}.zip`)
-  }
-
-  const sharePhoto = async (photo: PhotoRecord) => {
-    const lastModified = new Date(photo.captureDateTime).getTime() || Date.now()
-    const file = new File([photo.finalBlob], photo.fileName, {
-      type: photo.finalBlob.type || 'image/jpeg',
-      lastModified,
-    })
-
-    try {
-      if (!navigator.share) throw new Error('share-unavailable')
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: photo.fileName })
-        return
-      }
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return
-    }
-
-    downloadBlob(photo.finalBlob, photo.fileName)
+    root.file('manifest.json', JSON.stringify({ application: 'GeoTag Camera', version: '2.0', exportDate: new Date().toISOString(), photoCount: photos.length, schemaVersion: 2 }, null, 2))
+    downloadBlob(await zip.generateAsync({ type: 'blob' }), `GeoTagCamera-Backup-${new Date().toISOString().slice(0,10)}.zip`)
   }
 
   const importBackup = async (file: File) => {
     try {
       const zip = await JSZip.loadAsync(file)
-      const metadataEntries = Object.values(zip.files).filter((f) => f.name.includes('/metadata/') && f.name.endsWith('.json'))
-      for (const entry of metadataEntries) {
-        const raw = await entry.async('text')
-        const meta = JSON.parse(raw) as Partial<PhotoRecord>
-        const imageFile = zip.file(`GeoTagCamera-Backup/photos/${meta.fileName}`)
-        if (!imageFile || !meta.id || !meta.fileName) continue
-        const finalBlob = await imageFile.async('blob')
-        const thumbnailBlob = await createThumbnail(finalBlob)
-        const record: PhotoRecord = {
-          id: `${meta.id}-${crypto.randomUUID().slice(0, 8)}`,
-          originalBlob: finalBlob,
-          finalBlob,
-          thumbnailBlob,
+      const manifest = zip.file('GeoTagCamera-Backup/manifest.json')
+      const entries = Object.values(zip.files).filter(f => f.name.includes('/metadata/') && f.name.endsWith('.json'))
+      let imported = 0
+      for (const entry of entries) {
+        const meta = JSON.parse(await entry.async('text')) as Partial<PhotoRecord>
+        if (!meta.id || !meta.fileName) continue
+        const image = zip.file(`GeoTagCamera-Backup/photos/${meta.fileName}`)
+        if (!image) continue
+        const blob = await image.async('blob')
+        await savePhoto({
+          ...(meta as PhotoRecord),
+          id: `${meta.id}-${crypto.randomUUID().slice(0,8)}`,
+          originalBlob: blob,
+          finalBlob: blob,
+          thumbnailBlob: await createThumbnail(blob),
           createdAt: new Date().toISOString(),
-          captureDateTime: meta.captureDateTime ?? new Date().toISOString(),
-          latitude: meta.latitude,
-          longitude: meta.longitude,
-          accuracy: meta.accuracy,
-          altitude: meta.altitude,
-          heading: meta.heading,
-          speed: meta.speed,
-          address: meta.address,
-          notes: meta.notes,
-          hasLocation: Boolean(meta.latitude && meta.longitude),
-          overlayPreset: (meta.overlayPreset as OverlayPreset) ?? 'Classic GPS',
-          overlaySettings: meta.overlaySettings ?? overlay,
-          fileName: meta.fileName,
-        }
-        await savePhoto(record)
+          hasLocation: Boolean(meta.latitude != null && meta.longitude != null),
+        })
+        imported++
       }
       await refreshPhotos()
-      alert('Backup imported successfully.')
-    } catch {
-      alert('Invalid backup archive.')
-    }
+      setCameraError(manifest ? `Imported ${imported} photo(s).` : 'Backup imported.')
+    } catch { setCameraError('Backup is invalid or could not be read.') }
   }
 
-  const filteredPhotos = useMemo(() => {
-    return photos.filter((p) => {
-      if (filter === 'geo' && !p.hasLocation) return false
-      if (filter === 'no-geo' && p.hasLocation) return false
-      if (!search) return true
-      return [p.address, p.notes, p.fileName].some((v) => v?.toLowerCase().includes(search.toLowerCase()))
-    })
-  }, [photos, filter, search])
+  const filteredPhotos = useMemo(() => photos.filter(p => {
+    if (filter === 'geo' && !p.hasLocation) return false
+    if (filter === 'no-geo' && p.hasLocation) return false
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return [p.placeName, p.area, p.address, p.city, p.district, p.state, p.notes, p.fileName].some(v => v?.toLowerCase().includes(q))
+  }), [photos, filter, search])
 
-  const storageStats = useMemo(() => {
-    const totalBytes = photos.reduce((acc, p) => acc + p.finalBlob.size + p.thumbnailBlob.size, 0)
-    return { count: photos.length, mb: (totalBytes / (1024 * 1024)).toFixed(2) }
-  }, [photos])
+  const storageMb = useMemo(() => (photos.reduce((n,p) => n + p.finalBlob.size + p.thumbnailBlob.size, 0) / 1048576).toFixed(1), [photos])
 
-  if (!ready) {
-    return <div className="min-h-screen bg-slate-950 text-white grid place-items-center">Loading GeoTag Camera…</div>
-  }
+  if (!ready) return <div className="app-loading"><div className="loader-dot" /><span>Starting camera...</span></div>
 
-  if (!settings.setupComplete) {
-    return (
-      <main className="min-h-screen bg-slate-950 text-white p-6 flex flex-col justify-center gap-6">
-        <h1 className="text-4xl font-bold">GeoTag Camera</h1>
-        <p className="text-xl text-slate-300">Private GPS Camera</p>
-        <p>📷 Camera — To take photographs.</p>
-        <p>📍 Location — To add GPS information to photographs.</p>
-        <p>💾 Local Storage — To keep photographs and metadata on this device for offline use.</p>
-        <p className="text-emerald-300">Your photos and location data stay on this device unless you export them.</p>
-        <button className="h-12 rounded-xl bg-emerald-500 text-black font-bold" onClick={continueSetup}>
-          Continue
-        </button>
-      </main>
-    )
-  }
+  if (!settings.setupComplete) return (
+    <main className="setup-screen safe-top safe-bottom">
+      <div className="setup-mark"><Icon name="camera" size={28} /></div>
+      <p className="eyebrow">PRIVATE · OFFLINE-FIRST</p>
+      <h1>GeoTag Camera</h1>
+      <p className="setup-copy">A camera that puts the place, area and GPS directly onto your photograph. Photos remain on this device.</p>
+      <div className="permission-list">
+        <div><Icon name="camera" /><span><b>Camera</b><small>Take photographs. No microphone access.</small></span></div>
+        <div><Icon name="location" /><span><b>Location</b><small>Resolve GPS coordinates and nearby place details when you request them.</small></span></div>
+        <div><Icon name="download" /><span><b>Local storage</b><small>IndexedDB keeps your gallery offline. Persistent storage is requested where supported.</small></span></div>
+      </div>
+      <button className="primary-button setup-button" onClick={continueSetup} disabled={busy}>{busy ? 'Preparing…' : 'Enable camera'}</button>
+      <p className="fine-print">Location failure never blocks camera capture. Online place enrichment is optional.</p>
+    </main>
+  )
+
+  const gpsTone = gpsStatus === 'LOCATION DENIED' || gpsStatus === 'LOCATION UNAVAILABLE' || gpsStatus === 'GPS TIMEOUT' ? 'danger' : gpsStatus === 'LOW ACCURACY' ? 'warn' : gpsStatus === 'LOCATION OFF' ? 'muted' : 'good'
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-sky-50 to-indigo-100 text-slate-900 pb-20 md:pb-0 md:grid md:grid-cols-[240px_1fr]">
-      <nav className="hidden md:flex flex-col p-5 gap-3 bg-white/75 backdrop-blur border-r border-slate-200 sticky top-0 h-screen">
-        <div className="mb-2">
-          <p className="text-xs font-semibold tracking-[0.18em] text-slate-500">GEOTAG CAMERA</p>
-          <h2 className="text-lg font-bold text-slate-900">Workspace</h2>
-        </div>
-        {[
-          ['camera', '📷 Camera'],
-          ['gallery', '🖼 Gallery'],
-          ['map', '🗺 Map'],
-          ['settings', '⚙ Settings'],
-        ].map(([key, label]) => (
-          <button key={key} className={`h-11 rounded-xl text-left px-4 transition ${activeTab === key ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' : 'bg-slate-100 hover:bg-slate-200'}`} onClick={() => setActiveTab(key as Tab)}>
-            {label}
-          </button>
-        ))}
-      </nav>
+    <div className="app-shell">
+      <main className={activeTab === 'camera' ? 'camera-shell' : 'content-shell'}>
+        {activeTab === 'camera' && !draft && (
+          <section className="camera-screen">
+            <div className="camera-preview">
+              <video ref={videoRef} autoPlay muted playsInline className={facing === 'user' && settings.mirrorFrontCamera ? 'mirrored' : ''} />
+              <div className="camera-vignette" />
+              <div className="camera-top safe-top">
+                <button className={`status-pill gps ${gpsTone}`} onClick={resolveLocation} title="Refresh GPS"><span className="status-dot" /><span>{gpsStatus}</span></button>
+                <div className="camera-actions">
+                  <button className="icon-button glass" onClick={toggleTorch} aria-label="Torch"><Icon name="flash" /></button>
+                  <button className="icon-button glass" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')} aria-label="Switch camera"><Icon name="switch" /></button>
+                  <button className="icon-button glass" onClick={() => setActiveTab('settings')} aria-label="Settings"><Icon name="settings" /></button>
+                </div>
+              </div>
+              {cameraError && <div className="camera-error glass">{cameraError}<button onClick={() => setCameraError('')}><Icon name="x" size={16} /></button></div>}
+              <div className="camera-bottom safe-bottom">
+                <button className="round-action glass" onClick={() => setActiveTab('gallery')} aria-label="Gallery"><Icon name="image" /></button>
+                <button className="shutter-ring" onClick={() => capture(true)} disabled={busy} aria-label="Capture with GPS"><span className="shutter-core" /></button>
+                <button className="round-action glass" onClick={() => setActiveTab('map')} aria-label="Location map"><Icon name="map" /></button>
+              </div>
+              <div className="capture-options">
+                <button className="mode-chip active" onClick={() => capture(true)} disabled={busy}>GPS capture</button>
+                <button className="mode-chip" onClick={() => capture(false)} disabled={busy}>No GPS</button>
+                <label className="mode-chip"><Icon name="upload" size={15} /> Import<input type="file" accept="image/*" hidden onChange={e => { const f=e.target.files?.[0]; if(f){setDraft({originalBlob:f,notes:'',captureDateTime:new Date().toISOString()}); stopStream(stream)}}}} /></label>
+              </div>
+            </div>
+          </section>
+        )}
 
-      <main className="mx-auto w-full max-w-7xl md:px-6 md:py-6">
-        {activeTab === 'camera' && (
-          <section className="bg-slate-950 text-white min-h-screen md:min-h-full p-3 md:p-5 md:rounded-3xl md:border md:border-slate-800 md:shadow-2xl md:shadow-black/40">
-            {!draft ? (
-              <>
-                <div className="mx-auto mb-3 flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
-                  <span className="rounded-full bg-emerald-500/25 px-2 py-1">
-                    Camera: {cameraPermission}
-                  </span>
-                  <span className="rounded-full bg-blue-500/25 px-2 py-1">
-                    GPS: {gpsStatus}
-                  </span>
-                  <span className="rounded-full bg-indigo-500/25 px-2 py-1">
-                    Storage: {storagePermission}
-                  </span>
-                </div>
-                <div className="relative rounded-2xl overflow-hidden border border-slate-800 max-w-3xl mx-auto shadow-xl shadow-black/30">
-                  <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-[3/4] object-cover" />
-                  {cameraError && <p className="absolute bottom-2 left-2 right-2 text-sm bg-red-600/80 rounded p-2">{cameraError}</p>}
-                </div>
-                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto sm:gap-3">
-                  <button className="h-12 rounded-xl bg-white text-black font-semibold" onClick={() => capture(false)}>Capture</button>
-                  <button className="h-12 rounded-xl bg-emerald-500 text-black font-semibold" onClick={() => capture(true)}>Capture with Location</button>
-                  <button className="h-11 rounded-xl bg-slate-800" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')}>Switch Camera</button>
-                  <label className="h-11 rounded-xl bg-slate-800 grid place-items-center cursor-pointer">
-                    Import Photo
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0]
-                        if (!file) return
-                        setDraft({ originalBlob: file, notes: '', captureDateTime: new Date().toISOString() })
-                        stopStream(stream)
-                      }}
-                    />
-                  </label>
-                </div>
-              </>
-            ) : (
-              <>
-                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full max-w-3xl mx-auto rounded-2xl border border-slate-700 bg-slate-950 shadow-xl shadow-black/30" />
-                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto">
-                  <button
-                    className="h-11 rounded-xl bg-slate-700"
-                    onClick={() => {
-                      setDraft(null)
-                      setStampedBlob(null)
-                      startCamera(facing)
-                    }}
-                  >
-                    Retake
-                  </button>
-                  <button className="h-11 rounded-xl bg-emerald-500 text-black font-semibold" onClick={saveDraft}>Save Photo</button>
-                </div>
-                <div className="grid gap-2 mt-2 max-w-3xl mx-auto">
-                  <button className="h-11 rounded-xl bg-slate-800" onClick={async () => {
-                    try {
-                      const loc = await getCurrentLocation()
-                      setDraft((prev) => (prev ? { ...prev, location: loc } : prev))
-                    } catch {
-                      alert('Location unavailable')
-                    }
-                  }}>Use Current Location</button>
-                  <textarea
-                    placeholder="Notes"
-                    className="w-full rounded-xl bg-slate-800 p-3"
-                    value={draft.notes}
-                    onChange={(e) => setDraft((prev) => (prev ? { ...prev, notes: e.target.value } : prev))}
-                  />
-                  <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900/70 p-2">
-                    <p className="px-1 text-xs uppercase tracking-wide text-slate-300">Tag strip style</p>
-                    <div className="grid grid-cols-2 gap-2">
-                    <select
-                      className="h-11 rounded-xl bg-slate-800 px-3"
-                      value={overlay.preset}
-                      onChange={(e) => applyOverlayPreset(e.target.value as OverlayPreset)}
-                    >
-                      {presets.map((p) => <option key={p}>{p}</option>)}
-                    </select>
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={1}
-                      step={0.02}
-                      value={overlay.opacity}
-                      onChange={(e) => setOverlay((o) => ({ ...o, opacity: Number(e.target.value) }))}
-                    />
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
+        {activeTab === 'camera' && draft && (
+          <section className="editor-screen">
+            <header className="editor-header"><button className="icon-button glass" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }} aria-label="Retake"><Icon name="x" /></button><div><p className="eyebrow">CAPTURE PREVIEW</p><b>{draft.location ? placeSummary(draft.location).title : 'No location attached'}</b></div><button className="icon-button glass" onClick={saveDraft} disabled={busy}><Icon name="check" /></button></header>
+            <div className="preview-wrap"><canvas ref={previewCanvasRef} aria-label="Stamped photograph preview" /></div>
+            <div className="editor-sheet">
+              <div className="sheet-handle" />
+              <div className="location-preview">
+                <Icon name="location" size={18} />
+                <div><b>{draft.location ? placeSummary(draft.location).title : 'Location not attached'}</b><small>{draft.location ? [draft.location.area, draft.location.city, draft.location.district, draft.location.state].filter(Boolean).join(' · ') : 'You can capture without GPS.'}</small></div>
+              </div>
+              <button className="secondary-button" onClick={refreshLocation}><Icon name="refresh" size={17} /> {draft.location ? 'Refresh location' : 'Use current location'}</button>
+              <div className="editor-row"><label>Stamp style<select value={overlay.preset} onChange={e => setOverlay(o => ({...o, ...presetProfiles[e.target.value], preset: e.target.value as OverlayPreset}))}>{presets.map(p => <option key={p}>{p}</option>)}</select></label><label>Opacity<input type="range" min=".55" max="1" step=".01" value={overlay.opacity} onChange={e => setOverlay(o=>({...o,opacity:Number(e.target.value)}))}/></label></div>
+              <label className="notes-field">Notes<textarea value={draft.notes} onChange={e => setDraft({...draft,notes:e.target.value})} placeholder="Optional note" /></label>
+              <div className="editor-actions"><button className="secondary-button" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }}>Retake</button><button className="primary-button" onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save photo'}</button></div>
+            </div>
           </section>
         )}
 
         {activeTab === 'gallery' && (
-          <section className="p-4 md:p-0">
-            <div className="bg-white/80 backdrop-blur rounded-2xl border border-slate-200 p-3 md:p-4 shadow-sm">
-              <div className="grid md:grid-cols-[1fr_auto_auto] gap-2 mb-3">
-              <input className="h-11 rounded-xl border border-slate-300 px-3 bg-white" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <select className="h-11 rounded-xl border border-slate-300 px-3 bg-white" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
-                <option value="all">All</option>
-                <option value="geo">Geotagged only</option>
-                <option value="no-geo">Non-geotagged only</option>
-              </select>
-              <button className="h-11 rounded-xl bg-slate-900 text-white px-4" onClick={exportAll}>Export All</button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
-              {filteredPhotos.map((photo) => {
-                const url = URL.createObjectURL(photo.thumbnailBlob)
-                return (
-                  <article key={photo.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition">
-                    <img src={url} alt={photo.fileName} className="aspect-square object-cover w-full" />
-                    <div className="p-2.5 text-xs">
-                      <p className="font-semibold truncate">{displayDatePretty(photo.captureDateTime)}</p>
-                      <p>{photo.hasLocation ? '📍 GPS' : 'No GPS'}</p>
-                      <div className="grid grid-cols-2 gap-1 mt-2">
-                        <button className="h-8 rounded bg-slate-100" onClick={() => downloadBlob(photo.finalBlob, photo.fileName)}>Download</button>
-                        <button className="h-8 rounded bg-slate-100" onClick={async () => {
-                          await sharePhoto(photo)
-                        }}>Share</button>
-                        <button className="h-8 rounded bg-slate-100" onClick={() => downloadBlob(new Blob([JSON.stringify(photo, null, 2)], { type: 'application/json' }), `${photo.id}.json`)}>Metadata</button>
-                        <button className="h-8 rounded bg-red-100 text-red-700" onClick={async () => {
-                          await deletePhoto(photo.id)
-                          await refreshPhotos()
-                        }}>Delete</button>
-                      </div>
-                    </div>
-                  </article>
-                )
-              })}
-            </div>
-            </div>
+          <section className="library-view">
+            <header className="page-header"><div><p className="eyebrow">PRIVATE LIBRARY</p><h1>Gallery</h1></div><button className="primary-button compact" onClick={exportAll}><Icon name="download" size={17} /> Backup</button></header>
+            <div className="searchbar"><Icon name="search" size={18}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search place, area, city or note" /></div>
+            <div className="filter-row">{(['all','geo','no-geo'] as const).map(f=><button key={f} className={filter===f?'filter active':'filter'} onClick={()=>setFilter(f)}>{f==='all'?'All':f==='geo'?'GPS':'No GPS'}</button>)}<span className="library-count">{filteredPhotos.length} photos</span></div>
+            {filteredPhotos.length === 0 ? <div className="empty-state"><Icon name="image" size={30}/><b>No photos yet</b><span>Captured photographs will appear here.</span></div> : <div className="photo-grid">{filteredPhotos.map(photo => <button className="photo-tile" key={photo.id} onClick={()=>setSelectedPhoto(photo)}><img src={URL.createObjectURL(photo.thumbnailBlob)} alt={photo.fileName}/><span className="photo-meta">{photo.hasLocation ? <><Icon name="location" size={12}/> {photo.area || photo.city || 'GPS'}</> : 'No GPS'}</span></button>)}</div>}
+            {selectedPhoto && <PhotoViewer photo={selectedPhoto} onClose={()=>setSelectedPhoto(null)} onDelete={async()=>{await deletePhoto(selectedPhoto.id);setSelectedPhoto(null);await refreshPhotos()}} onShare={async()=>shareFile(selectedPhoto)} />}
           </section>
         )}
 
         {activeTab === 'map' && (
-          <section className="p-4 md:p-0">
-            <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm">
-            <h2 className="text-xl font-bold mb-3">Map</h2>
-            {photos.filter((p) => p.hasLocation).length === 0 ? (
-              <p>No geotagged photos yet.</p>
-            ) : (
-              <div className="grid gap-2">
-                <p className="text-sm text-slate-600">Offline-safe fallback map list (camera workflow never depends on remote maps).</p>
-                {photos.filter((p) => p.hasLocation).map((p) => (
-                  <div key={p.id} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50 p-3">
-                    <p className="font-semibold">{p.address ?? '📍 LOCATION'}</p>
-                    <p>{p.latitude?.toFixed(6)}, {p.longitude?.toFixed(6)}</p>
-                    <p className="text-sm text-slate-500">{displayDatePretty(p.captureDateTime)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-            </div>
+          <section className="library-view">
+            <header className="page-header"><div><p className="eyebrow">LOCATION INDEX</p><h1>Map</h1></div><span className="online-badge">{navigator.onLine ? 'Online' : 'Offline'}</span></header>
+            {photos.filter(p=>p.hasLocation).length === 0 ? <div className="empty-state"><Icon name="map" size={30}/><b>No geotagged photographs</b><span>Capture with GPS to build your location index.</span></div> : <div className="location-list">{photos.filter(p=>p.hasLocation).map(p=>{const s=placeSummary(p);return <article className="location-row" key={p.id}><div className="map-pin"><Icon name="location" size={18}/></div><div className="location-copy"><b>{s.title}</b><span>{[p.area,p.city,p.district,p.state].filter(Boolean).join(' · ')}</span><small>{p.latitude?.toFixed(6)}, {p.longitude?.toFixed(6)} · {displayDatePretty(p.captureDateTime)}</small></div><a className="external-map" href={`https://www.google.com/maps/search/?api=1&query=${p.latitude},${p.longitude}`} target="_blank" rel="noreferrer">Open</a></article>})}</div>}
           </section>
         )}
 
         {activeTab === 'settings' && (
-          <section className="p-4 md:p-0 space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 md:p-5 shadow-sm space-y-4">
-            <h2 className="text-2xl font-bold">Settings</h2>
-            <section className="rounded-xl bg-white border p-4 space-y-2">
-              <h3 className="font-semibold">Permissions</h3>
-              <p>Camera: {cameraPermission}</p>
-              <p>Location: {locationPermission}</p>
-              <p>Local Storage: {storagePermission}</p>
-            </section>
-            <section className="rounded-xl bg-white border p-4 space-y-2">
-              <h3 className="font-semibold">Location</h3>
-              <label className="flex items-center justify-between gap-2">
-                Allow external reverse geocoder (sends only coordinates)
-                <input
-                  type="checkbox"
-                  checked={settings.allowExternalGeocoder}
-                  onChange={async (e) => {
-                    const next = { ...settings, allowExternalGeocoder: e.target.checked }
-                    setSettings(next)
-                    await saveSettings(next)
-                  }}
-                />
-              </label>
-            </section>
-            <section className="rounded-xl bg-white border p-4 space-y-2">
-              <h3 className="font-semibold">Storage</h3>
-              <p>Photos: {storageStats.count}</p>
-              <p>Storage used: {storageStats.mb} MB</p>
-              <div className="grid grid-cols-2 gap-2">
-                <label className="h-11 rounded-xl bg-slate-900 text-white grid place-items-center cursor-pointer">
-                  Import Backup
-                  <input type="file" accept=".zip" className="hidden" onChange={(e) => {
-                    const f = e.target.files?.[0]
-                    if (f) importBackup(f)
-                  }} />
-                </label>
-                <button className="h-11 rounded-xl bg-red-600 text-white" onClick={async () => {
-                  const ok = confirm('This permanently removes all photos and metadata stored by GeoTag Camera on this device.')
-                  if (!ok) return
-                  await clearAllData()
-                  await refreshPhotos()
-                }}>Clear All Data</button>
-              </div>
-            </section>
-            <section className="rounded-xl bg-white border p-4 space-y-2">
-              <h3 className="font-semibold">Privacy</h3>
-              <p>Your photos and location data stay on this device unless you export them.</p>
-              <p className="text-sm text-slate-600">No login, no cloud storage, no ads, and no analytics.</p>
-            </section>
-            </div>
+          <section className="library-view">
+            <header className="page-header"><div><p className="eyebrow">CONTROL CENTER</p><h1>Settings</h1></div></header>
+            <SettingGroup title="Permissions">
+              <StatusLine label="Camera" value={cameraPermission}/><StatusLine label="Location" value={locationPermission}/><StatusLine label="Storage" value={storagePermission}/>
+            </SettingGroup>
+            <SettingGroup title="Location">
+              <Toggle label="High accuracy GPS" checked={settings.locationHighAccuracy} onChange={v=>setSavedSettings({...settings,locationHighAccuracy:v})}/>
+              <Toggle label="Online place enrichment" checked={settings.allowExternalGeocoder} onChange={v=>setSavedSettings({...settings,allowExternalGeocoder:v})}/>
+              <Toggle label="Address lookup" checked={settings.addressLookup} onChange={v=>setSavedSettings({...settings,addressLookup:v})}/>
+              <div className="setting-line"><span>Accuracy warning</span><select value={settings.lowAccuracyThresholdM} onChange={e=>setSavedSettings({...settings,lowAccuracyThresholdM:Number(e.target.value)})}><option value="25">±25 m</option><option value="50">±50 m</option><option value="100">±100 m</option></select></div>
+            </SettingGroup>
+            <SettingGroup title="Stamp">
+              <div className="setting-line"><span>Default style</span><select value={settings.defaultPreset} onChange={e=>setSavedSettings({...settings,defaultPreset:e.target.value as OverlayPreset})}>{presets.map(p=><option key={p}>{p}</option>)}</select></div>
+              <div className="setting-line"><span>Coordinate precision</span><select value={settings.coordinatePrecision} onChange={e=>setSavedSettings({...settings,coordinatePrecision:Number(e.target.value)})}><option value="5">5 decimals</option><option value="6">6 decimals</option><option value="7">7 decimals</option></select></div>
+              <Toggle label="Mirror front camera" checked={settings.mirrorFrontCamera} onChange={v=>setSavedSettings({...settings,mirrorFrontCamera:v})}/>
+            </SettingGroup>
+            <SettingGroup title="Storage">
+              <StatusLine label="Photos" value={String(photos.length)}/><StatusLine label="Estimated used" value={`${storageMb} MB`}/>
+              <div className="setting-actions"><label className="secondary-button"><Icon name="upload" size={17}/> Import backup<input type="file" accept=".zip" hidden onChange={e=>{const f=e.target.files?.[0];if(f)importBackup(f)}}/></label><button className="danger-button" onClick={async()=>{if(confirm('Delete all locally stored photographs and metadata?')){await clearAllData();await refreshPhotos()}}}><Icon name="trash" size={17}/> Clear all</button></div>
+            </SettingGroup>
+            <SettingGroup title="Privacy">
+              <p className="privacy-copy">No account, profile, cloud photo storage, advertising, analytics or background GPS. Reverse geocoding sends only the coordinates required by the selected provider. Camera capture, stamping and gallery work offline.</p>
+            </SettingGroup>
           </section>
         )}
       </main>
 
-      <nav className="fixed md:hidden bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-slate-300 h-16 grid grid-cols-4">
-        {[
-          ['camera', '📷', 'Camera'],
-          ['gallery', '🖼', 'Gallery'],
-          ['map', '🗺', 'Map'],
-          ['settings', '⚙', 'Settings'],
-        ].map(([key, icon, label]) => (
-          <button
-            key={key}
-            aria-label={label}
-            className={`text-sm transition ${activeTab === key ? 'bg-slate-900 text-white' : ''}`}
-            onClick={() => setActiveTab(key as Tab)}
-          >
-            {icon}<br />{label}
-          </button>
-        ))}
-      </nav>
+      <nav className="bottom-nav safe-bottom">{([['camera','camera','Camera'],['gallery','image','Gallery'],['map','map','Map'],['settings','settings','Settings']] as [Tab,IconName,string][]).map(([tab,icon,label])=><button key={tab} className={activeTab===tab?'active':''} onClick={()=>setActiveTab(tab)}><Icon name={icon} size={19}/><span>{label}</span></button>)}</nav>
     </div>
   )
+}
+
+const SettingGroup = ({ title, children }: { title:string; children:ReactNode }) => <section className="setting-group"><p className="eyebrow">{title}</p><div className="setting-body">{children}</div></section>
+const StatusLine = ({ label, value }: {label:string;value:string}) => <div className="setting-line"><span>{label}</span><b>{value}</b></div>
+const Toggle = ({ label, checked, onChange }: {label:string;checked:boolean;onChange:(v:boolean)=>void}) => <label className="setting-line"><span>{label}</span><input type="checkbox" checked={checked} onChange={e=>onChange(e.target.checked)}/></label>
+
+const PhotoViewer = ({ photo, onClose, onDelete, onShare }: {photo:PhotoRecord;onClose:()=>void;onDelete:()=>void;onShare:()=>void}) => (
+  <div className="viewer-backdrop" role="dialog" aria-modal="true">
+    <div className="viewer">
+      <header><button className="icon-button glass" onClick={onClose} aria-label="Close"><Icon name="x"/></button><span>{displayDatePretty(photo.captureDateTime)}</span><button className="icon-button glass" onClick={onShare} aria-label="Share"><Icon name="share"/></button></header>
+      <img src={URL.createObjectURL(photo.finalBlob)} alt={photo.fileName}/>
+      <div className="viewer-details">
+        <b>{photo.placeName || photo.area || photo.city || 'No location'}</b>
+        <span>{[photo.area,photo.city,photo.district,photo.state].filter(Boolean).join(' · ')}</span>
+        <small>{photo.latitude != null && photo.longitude != null ? `${photo.latitude.toFixed(6)}, ${photo.longitude.toFixed(6)} · Accuracy ±${Math.round(photo.accuracy || 0)} m` : 'No GPS data'}</small>
+        <div className="viewer-actions"><button className="secondary-button" onClick={()=>downloadBlob(photo.finalBlob,photo.fileName)}><Icon name="download" size={17}/> Download</button><button className="danger-button" onClick={onDelete}><Icon name="trash" size={17}/> Delete</button></div>
+      </div>
+    </div>
+  </div>
+)
+
+const shareFile = async (photo:PhotoRecord) => {
+  const file = new File([photo.finalBlob],photo.fileName,{type:photo.finalBlob.type||'image/jpeg',lastModified:new Date(photo.captureDateTime).getTime()||Date.now()})
+  try { if(navigator.share && (!navigator.canShare || navigator.canShare({files:[file]}))){await navigator.share({files:[file],title:photo.fileName});return} } catch(e){if(e instanceof DOMException&&e.name==='AbortError')return}
+  downloadBlob(photo.finalBlob,photo.fileName)
 }
 
 export default App
