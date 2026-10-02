@@ -45,6 +45,7 @@ export interface LocationData {
 
 export type OverlayPreset =
   | 'Classic GPS'
+  | 'Modern'
   | 'Minimal'
   | 'Compact'
   | 'Evidence'
@@ -88,8 +89,10 @@ export interface OverlaySettings {
   coordinatePrecision: number
 }
 
-export interface PhotoRecord extends LocationData {
+export interface PhotoRecord extends Omit<LocationData, 'latitude' | 'longitude'> {
   id: string
+  latitude?: number
+  longitude?: number
   originalBlob: Blob
   finalBlob: Blob
   thumbnailBlob: Blob
