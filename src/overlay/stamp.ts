@@ -259,6 +259,13 @@ const wrapText = (
   return lines
 }
 
+const toCardinal = (heading: number) => {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
+  const normalized = ((heading % 360) + 360) % 360
+  const index = Math.round(normalized / 45) % dirs.length
+  return dirs[index]
+}
+
 export const renderStampedPhoto = async ({
   imageBlob,
   location,
@@ -295,6 +302,21 @@ export const renderStampedPhoto = async ({
     const captureIso = captureTimestamp ?? location.timestamp
 
     const details: string[] = []
+    if (overlay.showLocality && location.locality) {
+      details.push(`Locality: ${location.locality}`)
+    }
+    if (overlay.showCity && location.city) {
+      details.push(`City: ${location.city}`)
+    }
+    if (overlay.showDistrict && location.district) {
+      details.push(`District: ${location.district}`)
+    }
+    if (overlay.showState && location.state) {
+      details.push(`State: ${location.state}`)
+    }
+    if (overlay.showCountry && location.country) {
+      details.push(`Country: ${location.country}`)
+    }
     if (overlay.showLatitude) {
       details.push(`Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
     }
@@ -310,6 +332,14 @@ export const renderStampedPhoto = async ({
     }
     if (overlay.showAltitude && location.altitude != null) {
       details.push(`Altitude: ${Math.round(location.altitude)} m`)
+    }
+    if (overlay.showHeading && location.heading != null) {
+      const rounded = Math.round(location.heading)
+      details.push(`Heading: ${rounded}° ${toCardinal(rounded)}`)
+    }
+    if (overlay.showSpeed && location.speed != null) {
+      const kmh = location.speed * 3.6
+      details.push(`Speed: ${kmh.toFixed(1)} km/h`)
     }
     if (overlay.showNotes && notes?.trim()) details.push(`Notes: ${notes.trim()}`)
 

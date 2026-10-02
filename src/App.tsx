@@ -21,6 +21,94 @@ interface DraftPhoto {
 
 const presets: OverlayPreset[] = ['Classic GPS', 'Minimal', 'Compact', 'Evidence', 'Travel', 'Custom']
 
+const presetProfiles: Record<Exclude<OverlayPreset, 'Custom'>, Partial<OverlaySettings>> = {
+  'Classic GPS': {
+    showTitle: true,
+    showLocationName: true,
+    showAddress: true,
+    showLatitude: true,
+    showLongitude: true,
+    showDate: true,
+    showTime: true,
+    showAccuracy: true,
+    showAltitude: true,
+    showHeading: true,
+    showSpeed: true,
+    showMap: true,
+    opacity: 0.84,
+    panelWidth: 0.98,
+    cornerRadius: 20,
+  },
+  Minimal: {
+    showTitle: false,
+    showLocationName: true,
+    showAddress: false,
+    showLatitude: true,
+    showLongitude: true,
+    showDate: true,
+    showTime: true,
+    showAccuracy: false,
+    showAltitude: false,
+    showHeading: false,
+    showSpeed: false,
+    showMap: false,
+    opacity: 0.78,
+    panelWidth: 0.9,
+    cornerRadius: 14,
+  },
+  Compact: {
+    showTitle: false,
+    showLocationName: true,
+    showAddress: false,
+    showLatitude: true,
+    showLongitude: true,
+    showDate: true,
+    showTime: true,
+    showAccuracy: true,
+    showAltitude: false,
+    showHeading: false,
+    showSpeed: false,
+    showMap: false,
+    opacity: 0.82,
+    panelWidth: 0.92,
+    cornerRadius: 14,
+  },
+  Evidence: {
+    showTitle: true,
+    showLocationName: true,
+    showAddress: true,
+    showLatitude: true,
+    showLongitude: true,
+    showDate: true,
+    showTime: true,
+    showAccuracy: true,
+    showAltitude: true,
+    showHeading: true,
+    showSpeed: true,
+    showMap: true,
+    opacity: 0.9,
+    panelWidth: 0.99,
+    cornerRadius: 12,
+  },
+  Travel: {
+    showTitle: true,
+    showLocationName: true,
+    showAddress: true,
+    showLatitude: true,
+    showLongitude: true,
+    showDate: true,
+    showTime: true,
+    showAccuracy: true,
+    showAltitude: false,
+    showHeading: false,
+    showSpeed: false,
+    showMap: true,
+    opacity: 0.8,
+    panelWidth: 0.96,
+    cornerRadius: 22,
+  },
+}
+
 const App = () => {
   const [ready, setReady] = useState(false)
   const [settings, setSettings] = useState<AppSettings>(defaultAppSettings)
@@ -46,6 +134,22 @@ const App = () => {
   const [filter, setFilter] = useState<'all' | 'geo' | 'no-geo'>('all')
 
   const refreshPhotos = async () => setPhotos(await getPhotos())
+
+  const applyOverlayPreset = (preset: OverlayPreset) => {
+    setOverlay((current) => {
+      if (preset === 'Custom') {
+        return { ...current, preset }
+      }
+
+      const profile = presetProfiles[preset]
+      return {
+        ...current,
+        ...profile,
+        preset,
+        coordinatePrecision: settings.coordinatePrecision,
+      }
+    })
+  }
 
   const checkPermissionState = async (name: PermissionName): Promise<PermissionStateLabel> => {
     try {
@@ -381,8 +485,8 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-100 to-slate-200/70 text-slate-900 pb-20 md:pb-0 md:grid md:grid-cols-[240px_1fr]">
-      <nav className="hidden md:flex flex-col p-5 gap-3 bg-white/80 backdrop-blur border-r border-slate-200 sticky top-0 h-screen">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-sky-50 to-indigo-100 text-slate-900 pb-20 md:pb-0 md:grid md:grid-cols-[240px_1fr]">
+      <nav className="hidden md:flex flex-col p-5 gap-3 bg-white/75 backdrop-blur border-r border-slate-200 sticky top-0 h-screen">
         <div className="mb-2">
           <p className="text-xs font-semibold tracking-[0.18em] text-slate-500">GEOTAG CAMERA</p>
           <h2 className="text-lg font-bold text-slate-900">Workspace</h2>
@@ -399,17 +503,27 @@ const App = () => {
         ))}
       </nav>
 
-      <main className="md:px-6 md:py-5">
+      <main className="mx-auto w-full max-w-7xl md:px-6 md:py-6">
         {activeTab === 'camera' && (
-          <section className="bg-black text-white min-h-screen md:min-h-full p-3 md:p-5 md:rounded-3xl md:border md:border-slate-800 md:shadow-2xl md:shadow-black/40">
+          <section className="bg-slate-950 text-white min-h-screen md:min-h-full p-3 md:p-5 md:rounded-3xl md:border md:border-slate-800 md:shadow-2xl md:shadow-black/40">
             {!draft ? (
               <>
-                <div className="relative rounded-2xl overflow-hidden border border-slate-800 max-w-3xl mx-auto">
+                <div className="mx-auto mb-3 flex max-w-3xl flex-wrap items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 p-3 text-xs text-emerald-100">
+                  <span className="rounded-full bg-emerald-500/25 px-2 py-1">
+                    Camera: {cameraPermission}
+                  </span>
+                  <span className="rounded-full bg-blue-500/25 px-2 py-1">
+                    GPS: {gpsStatus}
+                  </span>
+                  <span className="rounded-full bg-indigo-500/25 px-2 py-1">
+                    Storage: {storagePermission}
+                  </span>
+                </div>
+                <div className="relative rounded-2xl overflow-hidden border border-slate-800 max-w-3xl mx-auto shadow-xl shadow-black/30">
                   <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-[3/4] object-cover" />
                   {cameraError && <p className="absolute bottom-2 left-2 right-2 text-sm bg-red-600/80 rounded p-2">{cameraError}</p>}
                 </div>
-                <div className="mt-3 text-sm text-slate-300 text-center">{gpsStatus}</div>
-                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto">
+                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto sm:gap-3">
                   <button className="h-12 rounded-xl bg-white text-black font-semibold" onClick={() => capture(false)}>Capture</button>
                   <button className="h-12 rounded-xl bg-emerald-500 text-black font-semibold" onClick={() => capture(true)}>Capture with Location</button>
                   <button className="h-11 rounded-xl bg-slate-800" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')}>Switch Camera</button>
@@ -431,7 +545,7 @@ const App = () => {
               </>
             ) : (
               <>
-                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full max-w-3xl mx-auto rounded-2xl border border-slate-700 bg-slate-950" />
+                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full max-w-3xl mx-auto rounded-2xl border border-slate-700 bg-slate-950 shadow-xl shadow-black/30" />
                 <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto">
                   <button
                     className="h-11 rounded-xl bg-slate-700"
@@ -460,11 +574,13 @@ const App = () => {
                     value={draft.notes}
                     onChange={(e) => setDraft((prev) => (prev ? { ...prev, notes: e.target.value } : prev))}
                   />
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-2 rounded-xl border border-slate-700 bg-slate-900/70 p-2">
+                    <p className="px-1 text-xs uppercase tracking-wide text-slate-300">Tag strip style</p>
+                    <div className="grid grid-cols-2 gap-2">
                     <select
                       className="h-11 rounded-xl bg-slate-800 px-3"
                       value={overlay.preset}
-                      onChange={(e) => setOverlay((o) => ({ ...o, preset: e.target.value as OverlayPreset }))}
+                      onChange={(e) => applyOverlayPreset(e.target.value as OverlayPreset)}
                     >
                       {presets.map((p) => <option key={p}>{p}</option>)}
                     </select>
@@ -476,6 +592,7 @@ const App = () => {
                       value={overlay.opacity}
                       onChange={(e) => setOverlay((o) => ({ ...o, opacity: Number(e.target.value) }))}
                     />
+                    </div>
                   </div>
                 </div>
               </>
@@ -485,7 +602,7 @@ const App = () => {
 
         {activeTab === 'gallery' && (
           <section className="p-4 md:p-0">
-            <div className="bg-white/85 backdrop-blur rounded-2xl border border-slate-200 p-3 md:p-4 shadow-sm">
+            <div className="bg-white/80 backdrop-blur rounded-2xl border border-slate-200 p-3 md:p-4 shadow-sm">
               <div className="grid md:grid-cols-[1fr_auto_auto] gap-2 mb-3">
               <input className="h-11 rounded-xl border border-slate-300 px-3 bg-white" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
               <select className="h-11 rounded-xl border border-slate-300 px-3 bg-white" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
@@ -526,7 +643,7 @@ const App = () => {
 
         {activeTab === 'map' && (
           <section className="p-4 md:p-0">
-            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
+            <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 shadow-sm">
             <h2 className="text-xl font-bold mb-3">Map</h2>
             {photos.filter((p) => p.hasLocation).length === 0 ? (
               <p>No geotagged photos yet.</p>
@@ -548,7 +665,7 @@ const App = () => {
 
         {activeTab === 'settings' && (
           <section className="p-4 md:p-0 space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 md:p-5 shadow-sm space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-white/85 p-4 md:p-5 shadow-sm space-y-4">
             <h2 className="text-2xl font-bold">Settings</h2>
             <section className="rounded-xl bg-white border p-4 space-y-2">
               <h3 className="font-semibold">Permissions</h3>
