@@ -192,6 +192,7 @@ const unique = (parts: Array<string | undefined>) => {
 
 const pickLocationText = (location: LocationData) => {
   const fallbackParts = unique([
+    location.area,
     location.locality,
     location.city,
     location.district,
@@ -302,6 +303,9 @@ export const renderStampedPhoto = async ({
     const captureIso = captureTimestamp ?? location.timestamp
 
     const details: string[] = []
+    if (overlay.showArea && location.area) {
+      details.push(`Area: ${location.area}`)
+    }
     if (overlay.showLocality && location.locality) {
       details.push(`Locality: ${location.locality}`)
     }
@@ -314,8 +318,14 @@ export const renderStampedPhoto = async ({
     if (overlay.showState && location.state) {
       details.push(`State: ${location.state}`)
     }
+    if (overlay.showPostalCode && location.postalCode) {
+      details.push(`PIN: ${location.postalCode}`)
+    }
     if (overlay.showCountry && location.country) {
       details.push(`Country: ${location.country}`)
+    }
+    if (overlay.showPlusCode && location.plusCode) {
+      details.push(`Plus Code: ${location.plusCode}`)
     }
     if (overlay.showLatitude) {
       details.push(`Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
@@ -373,7 +383,7 @@ export const renderStampedPhoto = async ({
       }
     }
 
-    const detailsToDraw = details.slice(0, isPortrait ? 6 : 5)
+    const detailsToDraw = details.slice(0, isPortrait ? 8 : 6)
 
     const headingHeight = measured.reduce((sum, line) => sum + line.size + lineGap, 0)
     const detailLineHeight = base * 0.88 + lineGap
