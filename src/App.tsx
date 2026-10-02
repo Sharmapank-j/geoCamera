@@ -381,31 +381,35 @@ const App = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 pb-20 md:pb-0 md:grid md:grid-cols-[220px_1fr]">
-      <nav className="hidden md:flex flex-col p-4 gap-3 bg-white border-r border-slate-200">
+    <div className="min-h-screen bg-gradient-to-b from-slate-100 via-slate-100 to-slate-200/70 text-slate-900 pb-20 md:pb-0 md:grid md:grid-cols-[240px_1fr]">
+      <nav className="hidden md:flex flex-col p-5 gap-3 bg-white/80 backdrop-blur border-r border-slate-200 sticky top-0 h-screen">
+        <div className="mb-2">
+          <p className="text-xs font-semibold tracking-[0.18em] text-slate-500">GEOTAG CAMERA</p>
+          <h2 className="text-lg font-bold text-slate-900">Workspace</h2>
+        </div>
         {[
           ['camera', '📷 Camera'],
           ['gallery', '🖼 Gallery'],
           ['map', '🗺 Map'],
           ['settings', '⚙ Settings'],
         ].map(([key, label]) => (
-          <button key={key} className={`h-11 rounded-xl ${activeTab === key ? 'bg-slate-900 text-white' : 'bg-slate-100'}`} onClick={() => setActiveTab(key as Tab)}>
+          <button key={key} className={`h-11 rounded-xl text-left px-4 transition ${activeTab === key ? 'bg-slate-900 text-white shadow-lg shadow-slate-900/20' : 'bg-slate-100 hover:bg-slate-200'}`} onClick={() => setActiveTab(key as Tab)}>
             {label}
           </button>
         ))}
       </nav>
 
-      <main>
+      <main className="md:px-6 md:py-5">
         {activeTab === 'camera' && (
-          <section className="bg-black text-white min-h-screen md:min-h-full p-3">
+          <section className="bg-black text-white min-h-screen md:min-h-full p-3 md:p-5 md:rounded-3xl md:border md:border-slate-800 md:shadow-2xl md:shadow-black/40">
             {!draft ? (
               <>
-                <div className="relative rounded-2xl overflow-hidden border border-slate-800">
+                <div className="relative rounded-2xl overflow-hidden border border-slate-800 max-w-3xl mx-auto">
                   <video ref={videoRef} autoPlay muted playsInline className="w-full aspect-[3/4] object-cover" />
                   {cameraError && <p className="absolute bottom-2 left-2 right-2 text-sm bg-red-600/80 rounded p-2">{cameraError}</p>}
                 </div>
-                <div className="mt-3 text-sm text-slate-300">{gpsStatus}</div>
-                <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="mt-3 text-sm text-slate-300 text-center">{gpsStatus}</div>
+                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto">
                   <button className="h-12 rounded-xl bg-white text-black font-semibold" onClick={() => capture(false)}>Capture</button>
                   <button className="h-12 rounded-xl bg-emerald-500 text-black font-semibold" onClick={() => capture(true)}>Capture with Location</button>
                   <button className="h-11 rounded-xl bg-slate-800" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')}>Switch Camera</button>
@@ -427,8 +431,8 @@ const App = () => {
               </>
             ) : (
               <>
-                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full rounded-2xl border border-slate-700 bg-slate-950" />
-                <div className="grid grid-cols-2 gap-2 mt-3">
+                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full max-w-3xl mx-auto rounded-2xl border border-slate-700 bg-slate-950" />
+                <div className="grid grid-cols-2 gap-2 mt-3 max-w-3xl mx-auto">
                   <button
                     className="h-11 rounded-xl bg-slate-700"
                     onClick={() => {
@@ -441,7 +445,7 @@ const App = () => {
                   </button>
                   <button className="h-11 rounded-xl bg-emerald-500 text-black font-semibold" onClick={saveDraft}>Save Photo</button>
                 </div>
-                <div className="grid gap-2 mt-2">
+                <div className="grid gap-2 mt-2 max-w-3xl mx-auto">
                   <button className="h-11 rounded-xl bg-slate-800" onClick={async () => {
                     try {
                       const loc = await getCurrentLocation()
@@ -480,23 +484,24 @@ const App = () => {
         )}
 
         {activeTab === 'gallery' && (
-          <section className="p-4">
-            <div className="grid md:grid-cols-[1fr_auto_auto] gap-2 mb-3">
-              <input className="h-11 rounded-xl border px-3" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
-              <select className="h-11 rounded-xl border px-3" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
+          <section className="p-4 md:p-0">
+            <div className="bg-white/85 backdrop-blur rounded-2xl border border-slate-200 p-3 md:p-4 shadow-sm">
+              <div className="grid md:grid-cols-[1fr_auto_auto] gap-2 mb-3">
+              <input className="h-11 rounded-xl border border-slate-300 px-3 bg-white" placeholder="Search" value={search} onChange={(e) => setSearch(e.target.value)} />
+              <select className="h-11 rounded-xl border border-slate-300 px-3 bg-white" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
                 <option value="all">All</option>
                 <option value="geo">Geotagged only</option>
                 <option value="no-geo">Non-geotagged only</option>
               </select>
               <button className="h-11 rounded-xl bg-slate-900 text-white px-4" onClick={exportAll}>Export All</button>
             </div>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {filteredPhotos.map((photo) => {
                 const url = URL.createObjectURL(photo.thumbnailBlob)
                 return (
-                  <article key={photo.id} className="bg-white rounded-xl border overflow-hidden">
+                  <article key={photo.id} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition">
                     <img src={url} alt={photo.fileName} className="aspect-square object-cover w-full" />
-                    <div className="p-2 text-xs">
+                    <div className="p-2.5 text-xs">
                       <p className="font-semibold truncate">{displayDatePretty(photo.captureDateTime)}</p>
                       <p>{photo.hasLocation ? '📍 GPS' : 'No GPS'}</p>
                       <div className="grid grid-cols-2 gap-1 mt-2">
@@ -515,11 +520,13 @@ const App = () => {
                 )
               })}
             </div>
+            </div>
           </section>
         )}
 
         {activeTab === 'map' && (
-          <section className="p-4">
+          <section className="p-4 md:p-0">
+            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 shadow-sm">
             <h2 className="text-xl font-bold mb-3">Map</h2>
             {photos.filter((p) => p.hasLocation).length === 0 ? (
               <p>No geotagged photos yet.</p>
@@ -527,7 +534,7 @@ const App = () => {
               <div className="grid gap-2">
                 <p className="text-sm text-slate-600">Offline-safe fallback map list (camera workflow never depends on remote maps).</p>
                 {photos.filter((p) => p.hasLocation).map((p) => (
-                  <div key={p.id} className="rounded-xl border bg-white p-3">
+                  <div key={p.id} className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50 p-3">
                     <p className="font-semibold">{p.address ?? '📍 LOCATION'}</p>
                     <p>{p.latitude?.toFixed(6)}, {p.longitude?.toFixed(6)}</p>
                     <p className="text-sm text-slate-500">{displayDatePretty(p.captureDateTime)}</p>
@@ -535,11 +542,13 @@ const App = () => {
                 ))}
               </div>
             )}
+            </div>
           </section>
         )}
 
         {activeTab === 'settings' && (
-          <section className="p-4 space-y-4">
+          <section className="p-4 md:p-0 space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-white/90 p-4 md:p-5 shadow-sm space-y-4">
             <h2 className="text-2xl font-bold">Settings</h2>
             <section className="rounded-xl bg-white border p-4 space-y-2">
               <h3 className="font-semibold">Permissions</h3>
@@ -587,11 +596,12 @@ const App = () => {
               <p>Your photos and location data stay on this device unless you export them.</p>
               <p className="text-sm text-slate-600">No login, no cloud storage, no ads, and no analytics.</p>
             </section>
+            </div>
           </section>
         )}
       </main>
 
-      <nav className="fixed md:hidden bottom-0 inset-x-0 bg-white border-t border-slate-300 h-16 grid grid-cols-4">
+      <nav className="fixed md:hidden bottom-0 inset-x-0 bg-white/95 backdrop-blur border-t border-slate-300 h-16 grid grid-cols-4">
         {[
           ['camera', '📷', 'Camera'],
           ['gallery', '🖼', 'Gallery'],
@@ -601,7 +611,7 @@ const App = () => {
           <button
             key={key}
             aria-label={label}
-            className={`text-sm ${activeTab === key ? 'bg-slate-900 text-white' : ''}`}
+            className={`text-sm transition ${activeTab === key ? 'bg-slate-900 text-white' : ''}`}
             onClick={() => setActiveTab(key as Tab)}
           >
             {icon}<br />{label}
