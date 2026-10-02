@@ -121,7 +121,7 @@ export interface AppSettings {
 }
 
 export const defaultOverlaySettings: OverlaySettings = {
-  preset: 'Classic GPS',
+  preset: 'Evidence',
   showTitle: true,
   showLocationName: true,
   showArea: true,
@@ -146,10 +146,10 @@ export const defaultOverlaySettings: OverlaySettings = {
   position: 'bottom',
   opacity: 0.9,
   fontSize: 18,
-  panelWidth: 0.94,
-  mapSize: 0.28,
+  panelWidth: 0.97,
+  mapSize: 0.24,
   spacing: 1,
-  cornerRadius: 18,
+  cornerRadius: 6,
   textAlign: 'left',
   coordinatePrecision: 6,
 }
@@ -161,7 +161,7 @@ export const defaultAppSettings: AppSettings = {
   coordinatePrecision: 6,
   dateFormat: 'DD/MM/YYYY',
   use24Hour: false,
-  defaultPreset: 'Classic GPS',
+  defaultPreset: 'Evidence',
   addressLookup: true,
   allowExternalGeocoder: true,
   locationHighAccuracy: true,
