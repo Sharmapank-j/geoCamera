@@ -202,6 +202,7 @@ const pickLocationText = (location: LocationData) => {
 
   const title =
     location.placeName?.trim() ||
+    location.area?.trim() ||
     location.locality?.trim() ||
     location.city?.trim() ||
     location.district?.trim() ||
@@ -226,10 +227,14 @@ const pickLocationText = (location: LocationData) => {
     }
   }
 
+  const areaCity = unique([location.area, location.locality, location.city]).filter((part) => part.toLowerCase() !== title.toLowerCase()).join(', ')
+  const addressLine = location.address?.trim() || unique([location.streetNumber && location.street ? `${location.streetNumber} ${location.street}` : undefined, location.street]).join(', ')
+  const adminLine = unique([location.district, location.state, location.country]).join(', ')
+
   return {
     title,
-    lineOne: remaining.slice(0, 2).join(', '),
-    lineTwo: remaining.slice(2, 4).join(', '),
+    lineOne: areaCity || remaining.slice(0, 2).join(', '),
+    lineTwo: addressLine || adminLine || remaining.slice(2, 4).join(', '),
   }
 }
 
@@ -391,7 +396,7 @@ export const renderStampedPhoto = async ({
     const textHeight = headingHeight + sectionGap + detailsHeight
     const bodyHeight = Math.max(textHeight, mapSize)
 
-    const maxPanelHeight = Math.max(160, Math.min(height * (isPortrait ? 0.33 : 0.4), height - 20))
+    const maxPanelHeight = Math.max(150, Math.min(height * (isPortrait ? 0.29 : 0.31), height - 16))
     let panelHeight = titleHeight + bodyHeight + pad * 1.3
 
     while (panelHeight > maxPanelHeight && detailsToDraw.length > 3) {
@@ -433,7 +438,7 @@ export const renderStampedPhoto = async ({
     if (overlay.showTitle) {
       ctx.font = `700 ${Math.round(base * 0.86)}px Inter, system-ui, sans-serif`
       ctx.fillStyle = '#f8fafc'
-      ctx.fillText('GPS MAP CAMERA', textLeft, finalPanelY + titleHeight * 0.68)
+      ctx.fillText('GPS MAP CAMERA  •  LOCATION VERIFIED', textLeft, finalPanelY + titleHeight * 0.68)
     }
 
     let cursorY = contentTop
