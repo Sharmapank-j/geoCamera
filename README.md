@@ -125,3 +125,16 @@ Photo records are stored in IndexedDB with original blob, stamped blob, thumbnai
 - Framework preset: Vite
 - Build command: `npm run build`
 - Output directory: `dist`
+
+
+## GPS/location enrichment
+
+The core app is offline-first. Camera capture, Canvas stamping, IndexedDB storage, gallery, export and backup do not require a network connection.
+
+When online enrichment is enabled, the app sends only the current GPS coordinates to a configured reverse-geocoding provider. A browser-restricted `VITE_GOOGLE_MAPS_API_KEY` can be supplied for Google Geocoding; otherwise the app falls back to OpenStreetMap Nominatim. The UI normalizes place/POI, area/neighbourhood, locality/city, district, state, postal code and country independently. The **Area** field is deliberately preserved and is included in the GPS stamp when available.
+
+Do not scrape Google Maps. Restrict any browser key by origin and API access in Google Cloud.
+
+## Design
+
+GeoTag Camera uses a camera-first dark interface with safe-area support, translucent controls, tactile shutter interaction, compact GPS state, bottom navigation and a full-screen photo viewer. No account, ads, analytics, background GPS or cloud photo storage are required.
