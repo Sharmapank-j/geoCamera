@@ -323,6 +323,8 @@ const App = () => {
     })
   }, [photos, filter, search])
 
+  const safeDraftPreviewUrl = draftPreviewUrl.startsWith('blob:') ? draftPreviewUrl : ''
+
   const storageStats = useMemo(() => {
     const totalBytes = photos.reduce((acc, p) => acc + p.finalBlob.size + p.thumbnailBlob.size, 0)
     return { count: photos.length, mb: (totalBytes / (1024 * 1024)).toFixed(2) }
@@ -395,7 +397,7 @@ const App = () => {
               </>
             ) : (
               <>
-                {draftPreviewUrl && <img src={draftPreviewUrl} alt="Stamped preview" className="w-full rounded-2xl border border-slate-700" />}
+                {safeDraftPreviewUrl && <img src={safeDraftPreviewUrl} alt="Stamped preview" className="w-full rounded-2xl border border-slate-700" />}
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <button
                     className="h-11 rounded-xl bg-slate-700"
