@@ -12,8 +12,8 @@ let dbPromise: ReturnType<typeof openDB> | null = null
 export const getDb = () => {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db) {
-        const photoStore = db.objectStoreNames.contains('photos') ? db.transaction.objectStore('photos') : db.createObjectStore('photos', { keyPath: 'id' })
+      upgrade(db, _oldVersion, _newVersion, transaction) {
+        const photoStore = db.objectStoreNames.contains('photos') ? transaction.objectStore('photos') : db.createObjectStore('photos', { keyPath: 'id' })
         if (!photoStore.indexNames.contains('createdAt')) photoStore.createIndex('createdAt', 'createdAt')
         if (!photoStore.indexNames.contains('hasLocation')) photoStore.createIndex('hasLocation', 'hasLocation')
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
