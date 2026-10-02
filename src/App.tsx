@@ -49,7 +49,7 @@ const presetProfiles: Record<string, Partial<OverlaySettings>> = {
   Professional: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showAltitude: true, showMap: true, opacity: .94, panelWidth: .96, cornerRadius: 12 },
 }
 
-const accuracyLabel = (location?: LocationData) => location?.accuracy == null ? 'GPS READY' : `GPS ±${Math.round(location.accuracy)} m`
+const accuracyLabel = (location?: LocationData): GpsStatus => location?.accuracy == null ? 'GPS READY' : `GPS ±${Math.round(location.accuracy)} m`
 
 const placeSummary = (p: LocationData) => {
   const title = p.placeName || p.area || p.locality || p.city || 'Pinned location'
@@ -226,7 +226,7 @@ const App = () => {
     const capabilities = track.getCapabilities() as MediaTrackCapabilities & { torch?: boolean }
     if (!capabilities.torch) { setCameraError('Torch is not supported by this camera.'); return }
     try {
-      await track.applyConstraints({ advanced: [{ torch: !torch }] } as MediaTrackConstraints)
+      await track.applyConstraints({ advanced: [{ torch: !torch }] } as unknown as MediaTrackConstraints)
       setTorch(!torch)
     } catch { setCameraError('Torch could not be enabled on this device.') }
   }
