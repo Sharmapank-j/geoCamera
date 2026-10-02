@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <rect width="512" height="512" rx="120" fill="#020617"/>
+  <rect x="76" y="128" width="360" height="260" rx="28" fill="#111827" stroke="#34d399" stroke-width="12"/>
+  <circle cx="256" cy="258" r="84" fill="#0f172a" stroke="#22d3ee" stroke-width="12"/>
+  <circle cx="256" cy="258" r="30" fill="#22d3ee"/>
+  <path d="M256 70L304 146H208L256 70Z" fill="#34d399"/>
+  <text x="256" y="442" fill="white" font-size="46" text-anchor="middle" font-family="Arial, sans-serif">GPS</text>
+</svg>
