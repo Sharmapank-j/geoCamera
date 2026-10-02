@@ -45,6 +45,7 @@ export interface LocationData {
 
 export type OverlayPreset =
   | 'Classic GPS'
+  | 'Modern'
   | 'Minimal'
   | 'Compact'
   | 'Evidence'
