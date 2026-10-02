@@ -12,6 +12,7 @@ interface NominatimResult {
 
 interface GoogleComponent {
   long_name: string
+  short_name?: string
   types: string[]
 }
 
