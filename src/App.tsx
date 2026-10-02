@@ -37,9 +37,9 @@ const App = () => {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [facing, setFacing] = useState<CameraFacing>('environment')
   const videoRef = useRef<HTMLVideoElement>(null)
+  const previewCanvasRef = useRef<HTMLCanvasElement>(null)
 
   const [draft, setDraft] = useState<DraftPhoto | null>(null)
-  const [draftPreviewUrl, setDraftPreviewUrl] = useState('')
   const [stampedBlob, setStampedBlob] = useState<Blob | null>(null)
 
   const [search, setSearch] = useState('')
@@ -124,14 +124,27 @@ const App = () => {
         appSettings: settings,
       })
       setStampedBlob(stamped)
-      const url = URL.createObjectURL(stamped)
-      setDraftPreviewUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev)
-        return url
-      })
     }
     updatePreview()
   }, [draft, overlay, settings])
+
+  useEffect(() => {
+    const drawPreview = async () => {
+      if (!stampedBlob || !previewCanvasRef.current) return
+      const bitmap = await createImageBitmap(stampedBlob)
+      const canvas = previewCanvasRef.current
+      const maxWidth = canvas.parentElement?.clientWidth ?? bitmap.width
+      const ratio = maxWidth / bitmap.width
+      canvas.width = Math.round(bitmap.width * ratio)
+      canvas.height = Math.round(bitmap.height * ratio)
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+    }
+
+    drawPreview()
+  }, [stampedBlob])
 
   const continueSetup = async () => {
     try {
@@ -222,8 +235,6 @@ const App = () => {
     await savePhoto(photo)
     await refreshPhotos()
     setDraft(null)
-    if (draftPreviewUrl) URL.revokeObjectURL(draftPreviewUrl)
-    setDraftPreviewUrl('')
     setStampedBlob(null)
     setActiveTab('gallery')
   }
@@ -323,8 +334,6 @@ const App = () => {
     })
   }, [photos, filter, search])
 
-  const safeDraftPreviewUrl = draftPreviewUrl.startsWith('blob:') ? draftPreviewUrl : ''
-
   const storageStats = useMemo(() => {
     const totalBytes = photos.reduce((acc, p) => acc + p.finalBlob.size + p.thumbnailBlob.size, 0)
     return { count: photos.length, mb: (totalBytes / (1024 * 1024)).toFixed(2) }
@@ -397,14 +406,13 @@ const App = () => {
               </>
             ) : (
               <>
-                {safeDraftPreviewUrl && <img src={safeDraftPreviewUrl} alt="Stamped preview" className="w-full rounded-2xl border border-slate-700" />}
+                <canvas ref={previewCanvasRef} aria-label="Stamped preview" className="w-full rounded-2xl border border-slate-700 bg-slate-950" />
                 <div className="grid grid-cols-2 gap-2 mt-3">
                   <button
                     className="h-11 rounded-xl bg-slate-700"
                     onClick={() => {
                       setDraft(null)
                       setStampedBlob(null)
-                      setDraftPreviewUrl('')
                       startCamera(facing)
                     }}
                   >
