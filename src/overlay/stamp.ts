@@ -216,6 +216,10 @@ export const renderStampedPhoto = async ({
   const mapSize = Math.max(96, Math.round(Math.min(width * (portrait ? .145 : .16), panelH - pad * 2 - 28, 210)))
   const gap = Math.max(14, Math.round(width * .018))
   const lt = locationText(location)
+  const areaLocality = unique([
+    lt.area !== 'N/A' ? lt.area : undefined,
+    lt.locality !== 'N/A' ? lt.locality : undefined,
+  ]).join(' / ') || 'N/A'
   const stampTime = captureTimestamp ?? location.timestamp
   const headerSize = Math.max(10, Math.round(width * .014))
 
@@ -265,7 +269,7 @@ export const renderStampedPhoto = async ({
 
   // Four essential location lines, compact and explicit.
   const compactLines: Array<[string, string]> = [
-    ['AREA / LOCALITY', `${lt.area} / ${lt.locality}`],
+    ['AREA / LOCALITY', areaLocality],
     ['CITY / DISTRICT', `${lt.city} / ${lt.district}`],
     ['STATE / COUNTRY', `${lt.state} / ${lt.country}`],
     ['FULL ADDRESS', lt.address],
