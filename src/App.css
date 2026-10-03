@@ -484,3 +484,48 @@ input, textarea, select { -webkit-user-select: text; user-select: text; }
   .editor-actions-reference { gap:12px; }
   .editor-actions-reference > * { min-height:60px; font-size:15px; }
 }
+
+/* Final capture-preview layout: actions must never sit under navigation. */
+.app-shell:has(.editor-screen) .bottom-nav {
+  position:static;
+  margin:14px 18px 18px;
+  width:auto;
+}
+.app-shell:has(.editor-screen) main.content-shell,
+.app-shell:has(.editor-screen) main {
+  min-height:0;
+  padding-bottom:0;
+}
+.app-shell:has(.editor-screen) .editor-screen {
+  min-height:0;
+}
+.app-shell:has(.editor-screen) .editor-header {
+  position:relative;
+}
+.app-shell:has(.editor-screen) .preview-wrap {
+  min-height:0;
+  padding:8px 8px 18px;
+}
+.app-shell:has(.editor-screen) .preview-wrap canvas {
+  max-height:57dvh;
+}
+.app-shell:has(.editor-screen) .editor-sheet {
+  padding-bottom:4px;
+}
+.app-shell:has(.editor-screen) .editor-actions-reference {
+  margin-bottom:2px;
+}
+.location-preview-reference {
+  border-color:rgba(255,255,255,.11);
+}
+@media (max-width:700px) {
+  .app-shell:has(.editor-screen) .bottom-nav {
+    margin:12px 12px 14px;
+  }
+  .app-shell:has(.editor-screen) .preview-wrap canvas {
+    max-height:55dvh;
+  }
+  .app-shell:has(.editor-screen) .editor-sheet {
+    padding-inline:14px;
+  }
+}
