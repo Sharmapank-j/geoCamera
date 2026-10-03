@@ -146,7 +146,10 @@ const mergeDefined = (base: LocationData, ...parts: Array<Partial<LocationData>>
   const merged: LocationData = { ...base }
   for (const part of parts) {
     for (const [key, value] of Object.entries(part) as Array<[keyof LocationData, LocationData[keyof LocationData]]>) {
-      if (value !== undefined && value !== null && value !== '') merged[key] = value as never
+      const existing = merged[key]
+      if ((existing === undefined || existing === null || existing === '') && value !== undefined && value !== null && value !== '') {
+        merged[key] = value as never
+      }
     }
   }
   return merged
@@ -266,11 +269,11 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
 export const reverseGeocode = async (location: LocationData): Promise<LocationData> => {
   const withPlusCode = (resolved: LocationData) => ({
     ...resolved,
-    plusCode: encodePlusCode(
+    plusCode: resolved.plusCode ?? encodePlusCode(
       resolved.latitude,
       resolved.longitude,
       Boolean(resolved.city || resolved.town || resolved.village || resolved.locality),
-    ) ?? resolved.plusCode,
+    ),
   })
   if (!navigator.onLine) return withPlusCode(location)
 
@@ -286,7 +289,7 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
       const data = (await response.json()) as GoogleResponse
       if (data.status === 'OK' && data.results?.[0]) {
         const normalized = normalizeGoogle(location, data.results[0], data.plus_code?.global_code)
-        const nearby = await nearbyGooglePlace(location, googleKey)
+        const nearby = normalized.placeName ? {} : await nearbyGooglePlace(location, googleKey)
         const googleResolved = withResolved(location, { ...normalized, ...nearby })
 
         // Google can return the city but omit fine-grained Indian locality
@@ -297,7 +300,7 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
         // Fill missing fields from fallback providers without replacing
         // Google's more specific values. Provider order gives Google the
         // highest precedence, then Nominatim, then BigDataCloud.
-        return withPlusCode(mergeDefined(location, bigDataCloud, osm ?? {}, googleResolved))
+        return withPlusCode(mergeDefined(location, googleResolved, osm ?? {}, bigDataCloud))
       }
     } catch {
       // fallback below
