@@ -33,6 +33,7 @@ interface NearbyResponse { places?: NearbyPlace[] }
 interface GoogleResponse {
   status?: string
   results?: GoogleResult[]
+  plus_code?: { global_code?: string }
 }
 
 const unique = (values: Array<string | undefined>) => [...new Map(
@@ -125,7 +126,7 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
   })
 }
 
-const normalizeGoogle = (location: LocationData, result: GoogleResult) => {
+const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?: string) => {
   const components = result.address_components ?? []
   const pick = (...types: string[]) => components.find((c) => types.some((t) => c.types.includes(t)))?.long_name
   const neighborhood = pick('neighborhood')
@@ -155,6 +156,7 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult) => {
     postalCode: pick('postal_code'),
     country: countryComponent?.long_name,
     countryCode: countryComponent?.short_name,
+    plusCode,
     provider: 'Google Geocoding',
   })
 }
@@ -173,7 +175,7 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
       const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`)
       const data = (await response.json()) as GoogleResponse
       if (data.status === 'OK' && data.results?.[0]) {
-        const normalized = normalizeGoogle(location, data.results[0])
+        const normalized = normalizeGoogle(location, data.results[0], data.plus_code?.global_code)
         const nearby = await nearbyGooglePlace(location, googleKey)
         return withResolved(location, { ...normalized, ...nearby })
       }
