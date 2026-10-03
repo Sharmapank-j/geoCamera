@@ -9,7 +9,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon.svg'],
+      includeAssets: ['icon.png'],
       manifest: {
         name: 'GeoTag Camera',
         short_name: 'GeoTag Camera',
@@ -20,9 +20,9 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: 'icon.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml',
+            src: 'icon.png',
+            sizes: '716x716',
+            type: 'image/png',
             purpose: 'any maskable',
           },
         ],
