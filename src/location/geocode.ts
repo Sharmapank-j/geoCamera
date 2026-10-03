@@ -115,7 +115,7 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
   ])
   const area = different(areaCandidates, [city, district, a.state, a.country])
   const locality = different(areaCandidates, [area, city, district, a.state, a.country])
-  const placeName = result.name ?? a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house
+  const placeName = result.name ?? a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house ?? a.leisure
 
   return withResolved(location, {
     placeName,
@@ -221,6 +221,7 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
   const state = pick('administrative_area_level_1')
   const countryComponent = components.find((c) => c.types.includes('country'))
   const placeName = result.name ?? pick('establishment', 'premise', 'point_of_interest')
+  const street = pick('route')
   // Prefer the finest named locality. A second distinct locality is retained
   // separately so the stamp can show multiple fine-grained localities.
   const area = different(
@@ -238,8 +239,18 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
     neighbourhood: neighborhood,
     sublocality,
     streetNumber: pick('street_number'),
-    street: pick('route'),
-    address: result.formatted_address,
+    street,
+    address: result.formatted_address ?? composeAddress([
+      pick('street_number'),
+      street,
+      neighborhood,
+      ...sublocalities,
+      city,
+      district,
+      state,
+      pick('postal_code'),
+      countryComponent?.long_name,
+    ]),
     locality,
     city,
     district,

@@ -128,6 +128,12 @@ const unique = (items: Array<string | undefined | null>) => {
   return out
 }
 
+const countryFlag = (countryCode?: string) => {
+  const code = countryCode?.trim().toUpperCase()
+  if (!code || !/^[A-Z]{2}$/.test(code)) return ''
+  return String.fromCodePoint(...[...code].map(char => 127397 + char.charCodeAt(0)))
+}
+
 
 const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: number) => {
   const words = value.split(/\\s+/).filter(Boolean)
@@ -150,11 +156,13 @@ const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: 
 const locationText = (location: LocationData) => ({
   title: location.placeName?.trim() || location.area?.trim() || location.locality?.trim() || location.city?.trim() || 'GPS location',
   area: location.area?.trim() || location.neighbourhood?.trim() || location.sublocality?.trim() || location.street?.trim(),
+  road: location.street?.trim(),
   locality: location.locality?.trim() || location.sublocality?.trim() || location.neighbourhood?.trim(),
   city: location.city?.trim() || location.town?.trim() || location.village?.trim() || location.municipality?.trim(),
   district: location.district?.trim(),
   state: location.state?.trim() || location.region?.trim(),
   country: location.country?.trim() || location.countryCode?.trim(),
+  countryCode: location.countryCode?.trim(),
   postalCode: location.postalCode?.trim(),
   address: location.address?.trim() ||
     unique([
@@ -219,7 +227,7 @@ export const renderStampedPhoto = async ({
   ctx.font = `850 ${headerSize}px Inter, Arial, sans-serif`
   ctx.textAlign = 'left'
   ctx.fillStyle = '#ffffff'
-  ctx.fillText('GPS MAP CAMERA', pad, y + pad + headerSize)
+  ctx.fillText(`GPS MAP CAMERA${countryFlag(lt.countryCode) ? `  ${countryFlag(lt.countryCode)}` : ''}`, pad, y + pad + headerSize)
   ctx.textAlign = 'right'
   ctx.fillStyle = '#e2b85a'
   const gpsQuality = location.accuracy == null
@@ -236,11 +244,20 @@ export const renderStampedPhoto = async ({
   ctx.fillText(titleLines[0] || 'GPS location', pad, top + Math.max(18, Math.round(width * .029)) * .82)
   top += Math.max(20, Math.round(width * .029)) + 3
 
-  // Four essential location lines, compact and explicit.
+  const plusCode = location.plusCode?.trim() || encodePlusCode(
+    location.latitude,
+    location.longitude,
+    Boolean(location.city || location.town || location.village || location.locality),
+  )
+  const cityDistrict = unique([lt.city, lt.district]).join(' · ')
+  const stateCountryPostal = unique([lt.state, lt.country, lt.postalCode]).join(' · ')
+  // Keep each semantic field distinct even when the compact stamp combines
+  // related values on one line for readability.
   const compactLines: Array<[string, string]> = [
-    [areaLocality ? 'AREA / LOCALITY' : '', areaLocality],
-    [unique([lt.city, lt.district]).join(' / ') ? 'CITY / DISTRICT' : '', unique([lt.city, lt.district]).join(' / ')],
-    [unique([lt.state, lt.country]).join(' / ') ? 'STATE / COUNTRY' : '', unique([lt.state, lt.country]).join(' / ')],
+    [plusCode && areaLocality ? 'PLUS CODE · AREA / LOCALITY' : plusCode ? 'PLUS CODE' : areaLocality ? 'AREA / LOCALITY' : '', unique([plusCode, areaLocality]).join(' · ')],
+    [lt.road ? 'ROAD / STREET' : '', lt.road ?? ''],
+    [cityDistrict ? 'CITY · DISTRICT' : '', cityDistrict],
+    [stateCountryPostal ? 'STATE · COUNTRY · POSTAL' : '', stateCountryPostal],
     [lt.address ? 'FULL ADDRESS' : '', lt.address ?? ''],
   ].filter((line): line is [string, string] => Boolean(line[0] && line[1]))
   const compactLabel = Math.max(7, Math.round(width * .009))
@@ -275,12 +292,7 @@ export const renderStampedPhoto = async ({
   ctx.lineWidth = 1
   ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
 
-  // Complete metadata in two compact rows.
-  const plusCode = location.plusCode?.trim() || encodePlusCode(
-    location.latitude,
-    location.longitude,
-    Boolean(location.city || location.town || location.village || location.locality),
-  )
+  // Complete metadata in compact rows.
   const fields: Array<[string, string]> = [
     ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
     ['LONGITUDE', location.longitude.toFixed(overlay.coordinatePrecision)],
