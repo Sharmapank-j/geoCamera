@@ -57,7 +57,6 @@ const App = () => {
   const [photos, setPhotos] = useState<PhotoRecord[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('camera')
   const [cameraPermission, setCameraPermission] = useState<PermissionStateLabel>('Not granted')
-  const [locationDetails, setLocationDetails] = useState<LocationData | undefined>(undefined)
   const [locationPermission, setLocationPermission] = useState<PermissionStateLabel>('Not granted')
   const [storagePermission, setStoragePermission] = useState<StorageStateLabel>('Available')
   const [cameraError, setCameraError] = useState('')
@@ -205,7 +204,6 @@ const App = () => {
       setLocationPermission('Allowed')
       setGpsStatus(location.accuracy != null && location.accuracy > settings.lowAccuracyThresholdM ? 'LOW ACCURACY' : accuracyLabel(location))
       setGpsCaptureEnabled(true)
-      setLocationDetails(enriched)
       return enriched
     } catch (e) {
       const status = String(e)
