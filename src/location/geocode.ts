@@ -183,9 +183,6 @@ const normalizeBigDataCloud = (result: BigDataCloudResult): Partial<LocationData
   }
 }
 
-const hasAddressData = (location: LocationData) => Boolean(
-  location.area || location.locality || location.city || location.district || location.state || location.country || location.address,
-)
 
 const reverseNominatim = async (location: LocationData): Promise<LocationData | undefined> => {
   try {
