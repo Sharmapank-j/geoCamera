@@ -22,6 +22,14 @@ interface GoogleResult {
   address_components?: GoogleComponent[]
 }
 
+interface NearbyPlace {
+  displayName?: { text?: string }
+  formattedAddress?: string
+  location?: { latitude?: number; longitude?: number }
+}
+
+interface NearbyResponse { places?: NearbyPlace[] }
+
 interface GoogleResponse {
   status?: string
   results?: GoogleResult[]
@@ -43,6 +51,45 @@ const withResolved = (location: LocationData, resolved: Partial<LocationData>): 
 })
 
 const composeAddress = (parts: Array<string | undefined>) => unique(parts).join(', ')
+
+
+const distanceMeters = (aLat: number, aLon: number, bLat: number, bLon: number) => {
+  const r = Math.PI / 180
+  const dLat = (bLat - aLat) * r
+  const dLon = (bLon - aLon) * r
+  const x = Math.sin(dLat / 2) ** 2 + Math.cos(aLat * r) * Math.cos(bLat * r) * Math.sin(dLon / 2) ** 2
+  return 6371000 * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x))
+}
+
+const nearbyGooglePlace = async (location: LocationData, key: string): Promise<Partial<LocationData>> => {
+  try {
+    const response = await fetch('https://places.googleapis.com/v1/places:searchNearby', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': key,
+        'X-Goog-FieldMask': 'places.displayName,places.formattedAddress,places.location',
+      },
+      body: JSON.stringify({
+        maxResultCount: 8,
+        rankPreference: 'DISTANCE',
+        locationRestriction: { circle: { center: { latitude: location.latitude, longitude: location.longitude }, radius: 250 } },
+        languageCode: navigator.language || 'en',
+      }),
+    })
+    if (!response.ok) return {}
+    const data = (await response.json()) as NearbyResponse
+    const candidate = data.places?.find(place => {
+      const lat = place.location?.latitude
+      const lon = place.location?.longitude
+      return typeof lat === 'number' && typeof lon === 'number' && distanceMeters(location.latitude, location.longitude, lat, lon) <= 120 && Boolean(place.displayName?.text)
+    })
+    if (!candidate?.displayName?.text) return {}
+    return { placeName: candidate.displayName.text }
+  } catch {
+    return {}
+  }
+}
 
 const normalizeNominatim = (location: LocationData, result: NominatimResult) => {
   const a = result.address ?? {}
@@ -125,7 +172,11 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
       })
       const response = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`)
       const data = (await response.json()) as GoogleResponse
-      if (data.status === 'OK' && data.results?.[0]) return normalizeGoogle(location, data.results[0])
+      if (data.status === 'OK' && data.results?.[0]) {
+        const normalized = normalizeGoogle(location, data.results[0])
+        const nearby = await nearbyGooglePlace(location, googleKey)
+        return withResolved(location, { ...normalized, ...nearby })
+      }
     } catch {
       // fallback below
     }
