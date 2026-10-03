@@ -95,11 +95,16 @@ const nearbyGooglePlace = async (location: LocationData, key: string): Promise<P
 const normalizeNominatim = (location: LocationData, result: NominatimResult) => {
   const a = result.address ?? {}
   const city = a.city ?? a.town ?? a.village ?? a.municipality
-  const district = a.county ?? a.city_district ?? a.state_district
+  const cityDistrict = a.city_district
+  // In Jamshedpur and similar Indian addresses, Nominatim can return the
+  // actual locality/area (for example "Golmuri-Cum-Jugsalai") as city_district.
+  // Keep the administrative district separate when available, but promote
+  // city_district into the visible Area/Locality field.
+  const district = a.county ?? a.state_district ?? cityDistrict
   const area = different(
-    [a.neighbourhood, a.suburb, a.quarter, a.residential, a.hamlet, a.locality, a.sublocality],
+    [a.neighbourhood, a.suburb, a.quarter, a.residential, a.hamlet, a.locality, a.sublocality, cityDistrict],
     [city, district, a.state, a.country],
-  )
+  ) ?? (cityDistrict && cityDistrict.toLowerCase() !== city?.toLowerCase() ? cityDistrict : undefined)
   const placeName = result.name ?? a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house
 
   return withResolved(location, {
