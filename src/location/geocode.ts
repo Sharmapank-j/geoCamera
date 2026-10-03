@@ -95,11 +95,24 @@ const nearbyGooglePlace = async (location: LocationData, key: string): Promise<P
 const normalizeNominatim = (location: LocationData, result: NominatimResult) => {
   const a = result.address ?? {}
   const city = a.city ?? a.town ?? a.village ?? a.municipality
-  const district = a.county ?? a.city_district ?? a.state_district
-  const area = different(
-    [a.neighbourhood, a.suburb, a.quarter, a.residential, a.hamlet, a.locality, a.sublocality],
-    [city, district, a.state, a.country],
-  )
+  const cityDistrict = a.city_district
+  // In Jamshedpur and similar Indian addresses, Nominatim can return the
+  // actual locality/area (for example "Golmuri-Cum-Jugsalai") as city_district.
+  // Keep the administrative district separate when available, but promote
+  // city_district into the visible Area/Locality field.
+  const district = a.county ?? a.state_district
+  const areaCandidates = unique([
+    a.neighbourhood,
+    a.suburb,
+    a.quarter,
+    a.residential,
+    a.hamlet,
+    a.locality,
+    a.sublocality,
+    cityDistrict,
+  ])
+  const area = different(areaCandidates, [city, district, a.state, a.country])
+  const locality = different(areaCandidates, [area, city, district, a.state, a.country])
   const placeName = result.name ?? a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house
 
   return withResolved(location, {
@@ -110,7 +123,7 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
     streetNumber: a.house_number,
     street: a.road,
     address: result.display_name ?? composeAddress([a.house_number && a.road ? `${a.house_number} ${a.road}` : undefined, a.road, area, city, district, a.state, a.postcode, a.country]),
-    locality: a.locality,
+    locality,
     city,
     town: a.town,
     village: a.village,
@@ -130,15 +143,27 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
   const components = result.address_components ?? []
   const pick = (...types: string[]) => components.find((c) => types.some((t) => c.types.includes(t)))?.long_name
   const neighborhood = pick('neighborhood')
-  const sublocality = pick('sublocality_level_3', 'sublocality_level_2', 'sublocality_level_1', 'sublocality')
+  const sublocalities = unique([
+    pick('sublocality_level_3'),
+    pick('sublocality_level_2'),
+    pick('sublocality_level_1'),
+    pick('sublocality'),
+  ])
+  const sublocality = sublocalities[0]
   const city = pick('locality', 'postal_town')
   const district = pick('administrative_area_level_2')
   const state = pick('administrative_area_level_1')
   const countryComponent = components.find((c) => c.types.includes('country'))
   const placeName = result.name ?? pick('establishment', 'premise', 'point_of_interest')
+  // Prefer the finest named locality. A second distinct locality is retained
+  // separately so the stamp can show e.g. "Luabasa / Ghorabanda".
   const area = different(
-    [pick('establishment'), pick('premise'), neighborhood, sublocality, pick('route'), pick('sublocality')],
+    [neighborhood, ...sublocalities, pick('premise'), pick('establishment')],
     [city, district, state, countryComponent?.long_name],
+  )
+  const locality = different(
+    [neighborhood, ...sublocalities],
+    [area, city, district, state, countryComponent?.long_name],
   )
 
   return withResolved(location, {
@@ -149,7 +174,7 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
     streetNumber: pick('street_number'),
     street: pick('route'),
     address: result.formatted_address,
-    locality: pick('sublocality', 'locality'),
+    locality,
     city,
     district,
     state,
@@ -177,7 +202,32 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
       if (data.status === 'OK' && data.results?.[0]) {
         const normalized = normalizeGoogle(location, data.results[0], data.plus_code?.global_code)
         const nearby = await nearbyGooglePlace(location, googleKey)
-        return withResolved(location, { ...normalized, ...nearby })
+        const googleResolved = withResolved(location, { ...normalized, ...nearby })
+
+        // Google can return the city but omit fine-grained Indian locality
+        // components. Supplement only missing locality fields from Nominatim;
+        // never replace Google's more specific values.
+        if (googleResolved.area || googleResolved.locality) {
+          return googleResolved
+        }
+        try {
+          const fallback = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${location.latitude}&lon=${location.longitude}`, {
+            headers: { Accept: 'application/json' },
+          })
+          if (fallback.ok) {
+            const osm = normalizeNominatim(location, (await fallback.json()) as NominatimResult)
+            return withResolved(location, {
+              ...googleResolved,
+              area: googleResolved.area ?? osm.area,
+              locality: googleResolved.locality ?? osm.locality,
+              neighbourhood: googleResolved.neighbourhood ?? osm.neighbourhood,
+              sublocality: googleResolved.sublocality ?? osm.sublocality,
+            })
+          }
+        } catch {
+          // Keep the valid Google result.
+        }
+        return googleResolved
       }
     } catch {
       // fallback below
