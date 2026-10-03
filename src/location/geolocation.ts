@@ -41,7 +41,7 @@ const collectFixes = (timeout: number, highAccuracy: boolean, minimumAccuracy: n
     let settled = false
     let watchId: number | undefined
     const startedAt = Date.now()
-    const minimumSamples = 2
+    const minimumSamples = 3
 
     const finish = (result?: LocationData, error?: Error) => {
       if (settled) return
@@ -99,7 +99,7 @@ export const getCurrentLocation = async (
   timeout = 12000,
   options: LocationOptions = {},
 ): Promise<LocationData> => {
-  const safeTimeout = Math.max(5000, timeout)
+  const safeTimeout = Math.max(15000, timeout)
   const highAccuracy = options.highAccuracy ?? true
   const minimumAccuracy = Math.max(5, options.minimumAccuracy ?? 50)
   try {

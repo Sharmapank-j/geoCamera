@@ -39,6 +39,7 @@ export interface LocationData {
   countryCode?: string
   region?: string
   plusCode?: string
+  nearbyLandmarks?: string[]
   provider?: string
   resolvedAt?: string
 }
