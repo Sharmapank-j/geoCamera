@@ -162,7 +162,6 @@ const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: 
   return lines
 }
 
-const cardinal = (heading: number) => ['N','NE','E','SE','S','SW','W','NW'][Math.round((((heading % 360) + 360) % 360) / 45) % 8]
 
 export const renderStampedPhoto = async ({
   imageBlob, location, overlay, appSettings, captureTimestamp,
