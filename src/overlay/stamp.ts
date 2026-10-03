@@ -213,24 +213,11 @@ export const renderStampedPhoto = async ({
   // Keep the burned-in evidence strip compact: never more than 25% of the photo.
   const panelH = Math.round(height * (portrait ? .245 : .22))
   const y = height - panelH
-  const mapSize = Math.round(Math.min(width * (portrait ? .145 : .16), panelH - pad * 2 - 28, 210))
+  const mapSize = Math.max(96, Math.round(Math.min(width * (portrait ? .145 : .16), panelH - pad * 2 - 28, 210)))
   const gap = Math.max(14, Math.round(width * .018))
-  const mapX = width - pad - mapSize
-  const mapY = y + pad + 36
-  const contentRight = mapX - gap
-  const leftWidth = contentRight - pad
-
   const lt = locationText(location)
   const stampTime = captureTimestamp ?? location.timestamp
-  const labelSize = Math.max(10, Math.round(width * .014))
-  const valueSize = Math.max(14, Math.round(width * .019))
-  const titleSize = Math.max(25, Math.round(width * .042))
-  const bodySize = Math.max(13, Math.round(width * .017))
   const headerSize = Math.max(10, Math.round(width * .014))
-
-  ctx.save()
-  ctx.fillStyle = 'rgba(3,8,15,.97)'
-  ctx.fillRect(0, y, width, panelH)
 
   // Strong documentary header.
   ctx.fillStyle = '#d6a33a'
