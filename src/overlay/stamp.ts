@@ -210,9 +210,10 @@ export const renderStampedPhoto = async ({
 
   const portrait = height >= width
   const pad = Math.max(18, Math.round(width * .024))
-  const panelH = Math.round(height * (portrait ? .445 : .40))
+  // Keep the burned-in evidence strip compact: never more than 25% of the photo.
+  const panelH = Math.round(height * (portrait ? .245 : .22))
   const y = height - panelH
-  const mapSize = Math.round(Math.min(width * (portrait ? .25 : .24), 250))
+  const mapSize = Math.round(Math.min(width * (portrait ? .145 : .16), panelH - pad * 2 - 28, 210))
   const gap = Math.max(14, Math.round(width * .018))
   const mapX = width - pad - mapSize
   const mapY = y + pad + 36
@@ -242,45 +243,64 @@ export const renderStampedPhoto = async ({
   ctx.fillStyle = '#e2b85a'
   ctx.fillText('LOCATION VERIFIED', width - pad, y + pad + headerSize)
 
-  // Place / landmark.
-  let top = y + pad + 36
-  ctx.textAlign = 'left'
-  ctx.font = `850 ${titleSize}px Inter, Arial, sans-serif`
-  ctx.fillStyle = '#ffffff'
-  const titleLines = wrap(ctx, lt.title, leftWidth, 2)
-  titleLines.forEach((line, i) => ctx.fillText(line, pad, top + titleSize * .82 + i * titleSize * .9))
-  top += titleLines.length * titleSize * .9 + 7
+  // Compact evidence layout: identity/address at left, map at right, all
+  // capture metadata in a dense two-row footer. The panel stays within 25%.
+  const map = await drawMap(location, mapSize)
+  const radius = Math.max(7, Math.round(mapSize * .07))
+  const mapY = y + pad + 26
+  const mapX = width - pad - mapSize
+  const contentRight = mapX - gap
+  const leftWidth = Math.max(100, contentRight - pad)
 
-  // Explicit administrative hierarchy, never collapsed into a single ambiguous line.
-  const hierarchy = [
-    ['AREA / LOCALITY', `${lt.area}  /  ${lt.locality}`],
-    ['CITY / DISTRICT', `${lt.city}  /  ${lt.district}`],
-    ['STATE / COUNTRY', `${lt.state}  /  ${lt.country}`],
+  ctx.save()
+  ctx.fillStyle = 'rgba(3,8,15,.97)'
+  ctx.fillRect(0, y, width, panelH)
+  ctx.fillStyle = '#d6a33a'
+  ctx.fillRect(0, y, width, Math.max(2, Math.round(width * .0022)))
+
+  // Header.
+  ctx.font = `850 ${headerSize}px Inter, Arial, sans-serif`
+  ctx.textAlign = 'left'
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText('GPS MAP CAMERA', pad, y + pad + headerSize)
+  ctx.textAlign = 'right'
+  ctx.fillStyle = '#e2b85a'
+  ctx.fillText('LOCATION VERIFIED', width - pad, y + pad + headerSize)
+
+  // Place / landmark.
+  let top = y + pad + 27
+  ctx.textAlign = 'left'
+  ctx.font = `850 ${Math.max(18, Math.round(width * .029))}px Inter, Arial, sans-serif`
+  ctx.fillStyle = '#ffffff'
+  const titleLines = wrap(ctx, lt.title, leftWidth, 1)
+  ctx.fillText(titleLines[0] || 'GPS location', pad, top + Math.max(18, Math.round(width * .029)) * .82)
+  top += Math.max(20, Math.round(width * .029)) + 3
+
+  // Four essential location lines, compact and explicit.
+  const compactLines: Array<[string, string]> = [
+    ['AREA / LOCALITY', `${lt.area} / ${lt.locality}`],
+    ['CITY / DISTRICT', `${lt.city} / ${lt.district}`],
+    ['STATE / COUNTRY', `${lt.state} / ${lt.country}`],
     ['FULL ADDRESS', lt.address],
   ]
-  ctx.strokeStyle = 'rgba(255,255,255,.14)'
-  ctx.lineWidth = 1
-  hierarchy.forEach(([label, value]) => {
-    ctx.beginPath()
-    ctx.moveTo(pad, top - 5)
-    ctx.lineTo(contentRight, top - 5)
-    ctx.stroke()
-    ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
-    ctx.fillStyle = 'rgba(255,255,255,.43)'
+  const compactLabel = Math.max(7, Math.round(width * .009))
+  const compactValue = Math.max(9, Math.round(width * .0115))
+  const compactRow = Math.max(20, Math.round(panelH * .075))
+  compactLines.forEach(([label, value], i) => {
+    const yy = top + i * compactRow
+    ctx.font = `800 ${compactLabel}px Inter, Arial, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.42)'
     ctx.textAlign = 'left'
-    ctx.fillText(label, pad, top + labelSize)
-    ctx.font = `650 ${bodySize}px Inter, Arial, sans-serif`
+    ctx.fillText(label, pad, yy)
+    ctx.font = `650 ${compactValue}px Inter, Arial, sans-serif`
     ctx.fillStyle = '#ffffff'
-    const lines = wrap(ctx, value, leftWidth, label === 'FULL ADDRESS' ? 2 : 1)
-    lines.forEach((line, i) => ctx.fillText(line, pad, top + labelSize + bodySize + 1 + i * bodySize * .82))
-    top += labelSize + bodySize * (lines.length > 1 ? 1.75 : 1.25) + 7
+    const lines = wrap(ctx, value, leftWidth, 1)
+    ctx.fillText(lines[0] || 'N/A', pad, yy + compactValue + 1)
   })
 
-  // Map inset.
-  const map = await drawMap(location, mapSize)
+  // Street map inset.
   ctx.save()
   ctx.beginPath()
-  const radius = Math.max(9, Math.round(mapSize * .07))
   ctx.moveTo(mapX + radius, mapY)
   ctx.arcTo(mapX + mapSize, mapY, mapX + mapSize, mapY + mapSize, radius)
   ctx.arcTo(mapX + mapSize, mapY + mapSize, mapX, mapY + mapSize, radius)
@@ -294,13 +314,8 @@ export const renderStampedPhoto = async ({
   ctx.strokeStyle = 'rgba(255,255,255,.5)'
   ctx.lineWidth = 1
   ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
-  ctx.font = `500 ${Math.max(8, Math.round(labelSize * .75))}px Inter, Arial, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.45)'
-  ctx.textAlign = 'right'
-  ctx.fillText('© OpenStreetMap', mapX + mapSize - 6, mapY + mapSize - 5)
 
-  // Complete capture/evidence metadata. Every requested field is retained;
-  // unavailable sensor/address values are explicitly marked N/A rather than omitted.
+  // Complete metadata in two compact rows.
   const plusCode = location.plusCode?.trim() || makePlusCode(location.latitude, location.longitude)
   const fields: Array<[string, string]> = [
     ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
@@ -315,32 +330,32 @@ export const renderStampedPhoto = async ({
     ['PLUS CODE', plusCode],
   ]
 
-  const metaTop = y + panelH - Math.round(labelSize + valueSize + 11) * 3 - pad - 6
-  const cols = 3
-  const colGap = Math.max(12, Math.round(width * .014))
-  const colW = (width - pad * 2 - colGap * 2) / cols
-  const rowH = Math.max(39, Math.round(labelSize + valueSize + 12))
-
-  ctx.strokeStyle = 'rgba(255,255,255,.14)'
+  const footerTop = y + panelH - Math.max(34, Math.round(panelH * .27))
+  const cols = 5
+  const colGap = Math.max(8, Math.round(width * .009))
+  const colW = (width - pad * 2 - colGap * (cols - 1)) / cols
+  const rowH = Math.max(24, Math.round(panelH * .105))
+  ctx.strokeStyle = 'rgba(255,255,255,.13)'
   ctx.beginPath()
-  ctx.moveTo(pad, metaTop - 9)
-  ctx.lineTo(width - pad, metaTop - 9)
+  ctx.moveTo(pad, footerTop - 6)
+  ctx.lineTo(width - pad, footerTop - 6)
   ctx.stroke()
 
   fields.forEach(([label, value], index) => {
     const row = Math.floor(index / cols)
     const col = index % cols
     const x = pad + col * (colW + colGap)
-    const yy = metaTop + row * rowH
+    const yy = footerTop + row * rowH
     ctx.textAlign = 'left'
-    ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
-    ctx.fillStyle = 'rgba(255,255,255,.43)'
-    ctx.fillText(label, x, yy + labelSize)
-    ctx.font = `700 ${valueSize}px Inter, Arial, sans-serif`
+    ctx.font = `800 ${compactLabel}px Inter, Arial, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.42)'
+    ctx.fillText(label, x, yy + compactLabel)
+    ctx.font = `700 ${Math.max(10, Math.round(width * .0125))}px Inter, Arial, sans-serif`
     ctx.fillStyle = '#ffffff'
-    ctx.fillText(value, x, yy + labelSize + valueSize + 1)
+    ctx.fillText(value, x, yy + compactLabel + Math.max(10, Math.round(width * .0125)) + 1)
   })
 
+  ctx.restore()
   ctx.restore()
   return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .97))
 }
