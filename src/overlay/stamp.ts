@@ -23,490 +23,265 @@ const blobToImageBitmap = async (blob: Blob): Promise<DrawableImage> => {
   return img
 }
 
-const getDimensions = (img: DrawableImage) => {
-  if ('naturalWidth' in img) {
-    return { width: img.naturalWidth, height: img.naturalHeight }
-  }
+const dimensions = (img: DrawableImage) =>
+  'naturalWidth' in img ? { width: img.naturalWidth, height: img.naturalHeight } : { width: img.width, height: img.height }
 
-  return { width: img.width, height: img.height }
-}
+const loadImage = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => {
+  const img = new Image()
+  const timer = window.setTimeout(() => reject(new Error('timeout')), 2200)
+  img.crossOrigin = 'anonymous'
+  img.referrerPolicy = 'no-referrer'
+  img.decoding = 'async'
+  img.onload = () => { window.clearTimeout(timer); resolve(img) }
+  img.onerror = () => { window.clearTimeout(timer); reject(new Error('failed')) }
+  img.src = url
+})
 
-const loadImage = async (url: string): Promise<HTMLImageElement> =>
-  await new Promise((resolve, reject) => {
-    const img = new Image()
-    const timer = window.setTimeout(() => reject(new Error('timeout')), 2200)
-    img.crossOrigin = 'anonymous'
-    img.referrerPolicy = 'no-referrer'
-    img.decoding = 'async'
-    img.onload = () => {
-      window.clearTimeout(timer)
-      resolve(img)
-    }
-    img.onerror = () => {
-      window.clearTimeout(timer)
-      reject(new Error('failed'))
-    }
-    img.src = url
-  }) as HTMLImageElement
-
-const toTilePoint = (latitude: number, longitude: number, zoom: number) => {
-  const latRad = (latitude * Math.PI) / 180
+const tilePoint = (lat: number, lon: number, zoom: number) => {
+  const r = (lat * Math.PI) / 180
   const n = 2 ** zoom
-  const x = ((longitude + 180) / 360) * n
-  const y =
-    ((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) *
-    n
-
-  return { x, y, n }
+  return {
+    x: ((lon + 180) / 360) * n,
+    y: ((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2) * n,
+    n,
+  }
 }
 
-const drawMapTiles = async (
-  location: LocationData,
-  size: number,
-): Promise<HTMLCanvasElement | null> => {
+const drawMap = async (location: LocationData, size: number): Promise<HTMLCanvasElement | null> => {
   const zoom = 15
-  const tileSize = 256
-  const mapCanvas = document.createElement('canvas')
-  mapCanvas.width = size
-  mapCanvas.height = size
-  const mapCtx = mapCanvas.getContext('2d')
-  if (!mapCtx) return null
+  const tile = 256
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  ctx.fillStyle = '#d8e1e8'
+  ctx.fillRect(0, 0, size, size)
 
-  mapCtx.fillStyle = '#dbeafe'
-  mapCtx.fillRect(0, 0, size, size)
+  const p = tilePoint(location.latitude, location.longitude, zoom)
+  const worldX = p.x * tile
+  const worldY = p.y * tile
+  const left = worldX - size / 2
+  const top = worldY - size / 2
+  const minX = Math.floor(left / tile)
+  const minY = Math.floor(top / tile)
+  const maxX = Math.floor((left + size) / tile)
+  const maxY = Math.floor((top + size) / tile)
 
-  const { x, y, n } = toTilePoint(location.latitude, location.longitude, zoom)
-  const worldX = x * tileSize
-  const worldY = y * tileSize
-  const topLeftX = worldX - size / 2
-  const topLeftY = worldY - size / 2
-
-  const minTileX = Math.floor(topLeftX / tileSize)
-  const minTileY = Math.floor(topLeftY / tileSize)
-  const maxTileX = Math.floor((topLeftX + size) / tileSize)
-  const maxTileY = Math.floor((topLeftY + size) / tileSize)
-
-  const draws: Array<Promise<void>> = []
-  let loadedTiles = 0
-
-  for (let tileY = minTileY; tileY <= maxTileY; tileY += 1) {
-    if (tileY < 0 || tileY >= n) continue
-    for (let tileX = minTileX; tileX <= maxTileX; tileX += 1) {
-      const wrappedX = ((tileX % n) + n) % n
-      const url = `https://tile.openstreetmap.org/${zoom}/${wrappedX}/${tileY}.png`
-      const drawTask = loadImage(url)
-        .then((img) => {
-          const dx = tileX * tileSize - topLeftX
-          const dy = tileY * tileSize - topLeftY
-          mapCtx.drawImage(img, dx, dy, tileSize, tileSize)
-          loadedTiles += 1
-        })
-        .catch(() => {})
-      draws.push(drawTask)
+  let loaded = 0
+  const jobs: Promise<void>[] = []
+  for (let ty = minY; ty <= maxY; ty += 1) {
+    if (ty < 0 || ty >= p.n) continue
+    for (let tx = minX; tx <= maxX; tx += 1) {
+      const wrapped = ((tx % p.n) + p.n) % p.n
+      jobs.push(loadImage(`https://tile.openstreetmap.org/${zoom}/${wrapped}/${ty}.png`)
+        .then(img => {
+          ctx.drawImage(img, tx * tile - left, ty * tile - top, tile, tile)
+          loaded += 1
+        }).catch(() => {}))
     }
   }
+  await Promise.all(jobs)
+  if (!loaded) return null
+  try { ctx.getImageData(0, 0, 1, 1) } catch { return null }
 
-  await Promise.all(draws)
-  if (loadedTiles === 0) return null
-
-  try {
-    mapCtx.getImageData(0, 0, 1, 1)
-  } catch {
-    return null
-  }
-
-  return mapCanvas
-}
-
-const drawMarker = (
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-) => {
-  const pinX = x + size * 0.5
-  const pinY = y + size * 0.52
-  const radius = Math.max(6, size * 0.07)
-
-  ctx.fillStyle = 'rgba(220,38,38,0.24)'
+  const pinX = size / 2
+  const pinY = size / 2
+  ctx.fillStyle = '#d92323'
   ctx.beginPath()
-  ctx.arc(pinX, pinY + radius * 1.2, radius * 1.2, 0, Math.PI * 2)
+  ctx.arc(pinX, pinY, Math.max(5, size * .045), 0, Math.PI * 2)
   ctx.fill()
-
-  ctx.fillStyle = '#ef4444'
-  ctx.beginPath()
-  ctx.moveTo(pinX, pinY + radius * 1.4)
-  ctx.arc(pinX, pinY, radius, 0, Math.PI * 2)
-  ctx.fill()
-
   ctx.fillStyle = '#fff'
   ctx.beginPath()
-  ctx.arc(pinX, pinY, Math.max(2, radius * 0.38), 0, Math.PI * 2)
+  ctx.arc(pinX, pinY, Math.max(2, size * .018), 0, Math.PI * 2)
   ctx.fill()
+  return canvas
 }
 
-const drawMapFallback = (
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  size: number,
-  location: LocationData,
-) => {
+const fallbackMap = (ctx: CanvasRenderingContext2D, x: number, y: number, size: number, location: LocationData) => {
   ctx.save()
-  const fallback = ctx.createLinearGradient(x, y, x + size, y + size)
-  fallback.addColorStop(0, '#12233f')
-  fallback.addColorStop(1, '#1d3557')
-  ctx.fillStyle = fallback
+  ctx.fillStyle = '#15263a'
   ctx.fillRect(x, y, size, size)
-
-  ctx.fillStyle = 'rgba(255,255,255,0.1)'
-  ctx.fillRect(x + size * 0.18, y + size * 0.16, size * 0.64, 1)
-  ctx.fillRect(x + size * 0.18, y + size * 0.82, size * 0.64, 1)
-
-  ctx.font = `700 ${Math.max(18, size * 0.18)}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = '#ffffff'
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'
+  ctx.lineWidth = 1
+  for (let i = 1; i < 5; i += 1) {
+    ctx.beginPath(); ctx.moveTo(x + size * i / 5, y); ctx.lineTo(x + size * i / 5, y + size); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(x, y + size * i / 5); ctx.lineTo(x + size, y + size * i / 5); ctx.stroke()
+  }
+  ctx.fillStyle = '#fff'
+  ctx.font = `700 ${Math.max(11, size * .075)}px Inter, system-ui, sans-serif`
   ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText('📍', x + size / 2, y + size * 0.42)
-
-  ctx.font = `600 ${Math.max(10, size * 0.08)}px Inter, system-ui, sans-serif`
-  ctx.fillText(
-    `${location.latitude.toFixed(4)}, ${location.longitude.toFixed(4)}`,
-    x + size / 2,
-    y + size * 0.74,
-  )
-
+  ctx.fillText('GPS FIX', x + size / 2, y + size * .42)
+  ctx.font = `500 ${Math.max(8, size * .052)}px Inter, system-ui, sans-serif`
+  ctx.fillText(`${location.latitude.toFixed(5)}, ${location.longitude.toFixed(5)}`, x + size / 2, y + size * .60)
   ctx.restore()
 }
 
-const unique = (parts: Array<string | undefined>) => {
+const unique = (items: Array<string | undefined | null>) => {
   const out: string[] = []
-  for (const part of parts) {
-    const next = part?.trim()
-    if (!next) continue
-    const exists = out.some((item) => item.toLowerCase() === next.toLowerCase())
-    if (!exists) out.push(next)
+  for (const item of items) {
+    const value = item?.trim()
+    if (value && !out.some(x => x.toLowerCase() === value.toLowerCase())) out.push(value)
   }
   return out
 }
 
-const pickLocationText = (location: LocationData) => {
-  const fallbackParts = unique([
-    location.area,
-    location.locality,
-    location.city,
-    location.district,
-    location.state,
-    location.country,
-  ])
-
-  const title =
-    location.placeName?.trim() ||
-    location.area?.trim() ||
-    location.locality?.trim() ||
-    location.city?.trim() ||
-    location.district?.trim() ||
-    location.state?.trim() ||
-    location.country?.trim() ||
-    ''
-
-  const remaining = fallbackParts.filter(
-    (part) => part.toLowerCase() !== title.toLowerCase(),
-  )
-
-  if (remaining.length < 2 && location.address) {
-    const fromAddress = location.address
-      .split(',')
-      .map((part) => part.trim())
-      .filter(Boolean)
-    for (const part of fromAddress) {
-      if (!remaining.some((item) => item.toLowerCase() === part.toLowerCase())) {
-        remaining.push(part)
-      }
-      if (remaining.length >= 4) break
-    }
-  }
-
-  const areaCity = unique([location.area, location.locality, location.city]).filter((part) => part.toLowerCase() !== title.toLowerCase()).join(', ')
-  const addressLine = location.address?.trim() || unique([location.streetNumber && location.street ? `${location.streetNumber} ${location.street}` : undefined, location.street]).join(', ')
-  const adminLine = unique([location.district, location.state, location.country]).join(', ')
-
-  return {
-    title,
-    lineOne: areaCity || remaining.slice(0, 2).join(', '),
-    lineTwo: addressLine || adminLine || remaining.slice(2, 4).join(', '),
-  }
+const locationText = (location: LocationData) => {
+  const title = location.placeName?.trim() || location.area?.trim() || location.locality?.trim() ||
+    location.city?.trim() || location.district?.trim() || location.state?.trim() || 'GPS location'
+  const areaLine = unique([location.area, location.locality, location.city]).filter(x => x.toLowerCase() !== title.toLowerCase()).join(', ')
+  const address = location.address?.trim() ||
+    unique([location.streetNumber && location.street ? `${location.streetNumber} ${location.street}` : undefined, location.street]).join(', ')
+  const admin = unique([location.district, location.state, location.country]).join(', ')
+  return { title, areaLine, address: address || admin }
 }
 
-const wrapText = (
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxLines: number,
-) => {
-  const words = text.split(/\s+/).filter(Boolean)
-  if (words.length === 0) return []
+const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: number) => {
+  const words = value.split(/\s+/).filter(Boolean)
   const lines: string[] = []
-  let current = words[0]
-
-  for (let i = 1; i < words.length; i += 1) {
-    const candidate = `${current} ${words[i]}`
-    if (ctx.measureText(candidate).width <= maxWidth) {
-      current = candidate
-      continue
-    }
-    lines.push(current)
-    current = words[i]
-    if (lines.length === maxLines - 1) break
+  let current = ''
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (current && ctx.measureText(next).width > width) {
+      lines.push(current)
+      current = word
+      if (lines.length === max - 1) break
+    } else current = next
   }
-
-  if (lines.length < maxLines) lines.push(current)
-  if (lines.length > maxLines) lines.length = maxLines
+  if (current && lines.length < max) lines.push(current)
   return lines
 }
 
-const toCardinal = (heading: number) => {
-  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']
-  const normalized = ((heading % 360) + 360) % 360
-  const index = Math.round(normalized / 45) % dirs.length
-  return dirs[index]
-}
+const cardinal = (heading: number) => ['N','NE','E','SE','S','SW','W','NW'][Math.round((((heading % 360) + 360) % 360) / 45) % 8]
 
 export const renderStampedPhoto = async ({
-  imageBlob,
-  location,
-  notes,
-  overlay,
-  appSettings,
-  captureTimestamp,
+  imageBlob, location, notes, overlay, appSettings, captureTimestamp,
 }: StampInput): Promise<Blob> => {
   const source = await blobToImageBitmap(imageBlob)
-  const { width, height } = getDimensions(source)
-
+  const { width, height } = dimensions(source)
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) return imageBlob
-
   ctx.drawImage(source as CanvasImageSource, 0, 0, width, height)
+  if (!location) return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .95))
 
-  if (location) {
-    const isPortrait = height >= width
-    const panelWidth = Math.min(width * overlay.panelWidth, width - 24)
-    const panelX = (width - panelWidth) / 2
-    const panelY = height - 12
+  const portrait = height >= width
+  const base = Math.max(12, width * .014 * (overlay.fontSize / 18))
+  const pad = Math.max(12, base * .72)
+  const panelX = 0
+  const panelWidth = width
+  const mapSize = overlay.showMap ? Math.round(Math.min(portrait ? width * .22 : width * .18, 150)) : 0
+  const mapGap = mapSize ? pad * .9 : 0
+  const textWidth = width - pad * 2 - mapSize - mapGap
+  const lt = locationText(location)
+  const stampTime = captureTimestamp ?? location.timestamp
 
-    const base = Math.max(12, width * 0.016 * (overlay.fontSize / 18))
-    const pad = Math.max(10, base * 0.62)
-    const titleHeight = Math.max(base * 1.9, 28)
-    const mapSizeLimit = isPortrait ? panelWidth * 0.26 : panelWidth * 0.2
-    const mapSize = overlay.showMap ? Math.max(86, Math.min(152, mapSizeLimit)) : 0
-    const leftColumnWidth = Math.max(140, panelWidth - pad * 3 - mapSize)
+  const meta: string[] = []
+  if (overlay.showLatitude) meta.push(`LAT ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
+  if (overlay.showLongitude) meta.push(`LON ${location.longitude.toFixed(overlay.coordinatePrecision)}`)
+  if (overlay.showAccuracy && location.accuracy != null) meta.push(`ACC ±${Math.round(location.accuracy)} m`)
+  if (overlay.showDate) meta.push(displayDatePretty(stampTime))
+  if (overlay.showTime) meta.push(formatTime(stampTime, appSettings.use24Hour))
+  if (overlay.showPostalCode && location.postalCode) meta.push(`PIN ${location.postalCode}`)
+  if (overlay.showAltitude && location.altitude != null) meta.push(`ALT ${Math.round(location.altitude)} m`)
+  if (overlay.showHeading && location.heading != null) meta.push(`HDG ${Math.round(location.heading)}° ${cardinal(location.heading)}`)
+  if (overlay.showSpeed && location.speed != null) meta.push(`SPD ${(location.speed * 3.6).toFixed(1)} km/h`)
+  if (overlay.showNotes && notes?.trim()) meta.push(notes.trim())
 
-    const locationText = pickLocationText(location)
-    const captureIso = captureTimestamp ?? location.timestamp
+  ctx.font = `700 ${Math.round(base * 1.45)}px Inter, system-ui, sans-serif`
+  const titleLines = overlay.showLocationName ? wrap(ctx, lt.title, textWidth, 2) : []
+  ctx.font = `600 ${Math.round(base * .84)}px Inter, system-ui, sans-serif`
+  const subLines = overlay.showAddress ? [lt.areaLine, lt.address].filter(Boolean).flatMap(x => wrap(ctx, x, textWidth, 2)) : []
 
-    const details: string[] = []
-    if (overlay.showArea && location.area) {
-      details.push(`Area: ${location.area}`)
-    }
-    if (overlay.showLocality && location.locality) {
-      details.push(`Locality: ${location.locality}`)
-    }
-    if (overlay.showCity && location.city) {
-      details.push(`City: ${location.city}`)
-    }
-    if (overlay.showDistrict && location.district) {
-      details.push(`District: ${location.district}`)
-    }
-    if (overlay.showState && location.state) {
-      details.push(`State: ${location.state}`)
-    }
-    if (overlay.showPostalCode && location.postalCode) {
-      details.push(`PIN: ${location.postalCode}`)
-    }
-    if (overlay.showCountry && location.country) {
-      details.push(`Country: ${location.country}`)
-    }
-    if (overlay.showPlusCode && location.plusCode) {
-      details.push(`Plus Code: ${location.plusCode}`)
-    }
-    if (overlay.showLatitude) {
-      details.push(`Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`)
-    }
-    if (overlay.showLongitude) {
-      details.push(`Longitude: ${location.longitude.toFixed(overlay.coordinatePrecision)}`)
-    }
-    if (overlay.showDate) details.push(`Date: ${displayDatePretty(captureIso)}`)
-    if (overlay.showTime) {
-      details.push(`Time: ${formatTime(captureIso, appSettings.use24Hour)}`)
-    }
-    if (overlay.showAccuracy && location.accuracy != null) {
-      details.push(`Accuracy: ±${Math.round(location.accuracy)} m`)
-    }
-    if (overlay.showAltitude && location.altitude != null) {
-      details.push(`Altitude: ${Math.round(location.altitude)} m`)
-    }
-    if (overlay.showHeading && location.heading != null) {
-      const rounded = Math.round(location.heading)
-      details.push(`Heading: ${rounded}° ${toCardinal(rounded)}`)
-    }
-    if (overlay.showSpeed && location.speed != null) {
-      const kmh = location.speed * 3.6
-      details.push(`Speed: ${kmh.toFixed(1)} km/h`)
-    }
-    if (overlay.showNotes && notes?.trim()) details.push(`Notes: ${notes.trim()}`)
+  const headerH = Math.max(28, base * 1.8)
+  const titleH = Math.max(base * 2.0, titleLines.length * base * 1.45 + base * .45)
+  const subH = subLines.length ? subLines.length * base * .9 + base * .45 : 0
+  const metaH = meta.length ? base * 1.25 + Math.ceil(meta.length / (portrait ? 1 : 2)) * base * 1.0 : 0
+  const panelH = Math.min(height * (portrait ? .285 : .255), Math.max(125, headerH + titleH + subH + metaH + pad * 1.35))
+  const y = height - panelH
 
-    const headingLines: Array<{ text: string; size: number; weight: number; dim?: boolean }> = []
+  ctx.save()
+  ctx.globalAlpha = Math.min(1, Math.max(.72, overlay.opacity))
+  ctx.fillStyle = 'rgba(5,10,17,.94)'
+  ctx.fillRect(panelX, y, panelWidth, panelH)
+  ctx.fillStyle = '#e0a93a'
+  ctx.fillRect(0, y, width, Math.max(2, base * .10))
+  ctx.globalAlpha = 1
 
-    if (overlay.showLocationName && locationText.title) {
-      headingLines.push({ text: locationText.title, size: base * 1.2, weight: 700 })
-    }
+  const left = pad
+  const top = y + pad
+  const mapX = width - pad - mapSize
+  const mapY = y + pad
+  const contentRight = mapSize ? mapX - mapGap : width - pad
 
-    if (overlay.showAddress && locationText.lineOne) {
-      headingLines.push({ text: locationText.lineOne, size: base * 0.88, weight: 600, dim: true })
-    }
+  ctx.font = `700 ${Math.round(base * .64)}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.68)'
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'alphabetic'
+  if (overlay.showTitle) ctx.fillText('GPS MAP CAMERA', left, top + base * .62)
+  ctx.font = `700 ${Math.round(base * .64)}px Inter, system-ui, sans-serif`
+  ctx.textAlign = 'right'
+  ctx.fillStyle = 'rgba(255,255,255,.5)'
+  ctx.fillText('LOCATION VERIFIED', contentRight, top + base * .62)
 
-    if (overlay.showAddress && locationText.lineTwo) {
-      headingLines.push({ text: locationText.lineTwo, size: base * 0.88, weight: 600, dim: true })
-    }
+  let cy = top + headerH + base * .18
+  ctx.textAlign = 'left'
+  ctx.font = `700 ${Math.round(base * 1.45)}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = '#fff'
+  for (const line of titleLines) { ctx.fillText(line, left, cy + base * 1.1); cy += base * 1.42 }
 
-    if (!headingLines.length) {
-      headingLines.push({ text: 'GPS Coordinates', size: base * 1.02, weight: 700 })
-    }
+  ctx.font = `600 ${Math.round(base * .82)}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.78)'
+  for (const line of subLines) { if (cy > y + panelH - metaH - pad * 1.1) break; ctx.fillText(line, left, cy + base * .75); cy += base * .88 }
 
-    const lineGap = Math.max(5, base * 0.22)
-    const sectionGap = Math.max(6, base * 0.38)
-
-    const measured: Array<{ text: string; size: number; weight: number; dim?: boolean }> = []
-    for (const line of headingLines) {
-      ctx.font = `${line.weight} ${Math.round(line.size)}px Inter, system-ui, sans-serif`
-      const wrapped = wrapText(ctx, line.text, leftColumnWidth, line.size > base ? 2 : 1)
-      for (const textLine of wrapped) {
-        measured.push({ ...line, text: textLine })
-      }
-    }
-
-    const detailsToDraw = details.slice(0, isPortrait ? 8 : 6)
-
-    const headingHeight = measured.reduce((sum, line) => sum + line.size + lineGap, 0)
-    const detailLineHeight = base * 0.88 + lineGap
-    const detailsHeight = detailsToDraw.length * detailLineHeight
-    const textHeight = headingHeight + sectionGap + detailsHeight
-    const bodyHeight = Math.max(textHeight, mapSize)
-
-    const maxPanelHeight = Math.max(150, Math.min(height * (isPortrait ? 0.29 : 0.31), height - 16))
-    let panelHeight = titleHeight + bodyHeight + pad * 1.3
-
-    while (panelHeight > maxPanelHeight && detailsToDraw.length > 3) {
-      detailsToDraw.pop()
-      panelHeight -= detailLineHeight
-    }
-
-    panelHeight = Math.min(panelHeight, maxPanelHeight)
-    const finalPanelY = panelY - panelHeight
-
-    ctx.save()
-    ctx.globalAlpha = overlay.opacity
-    const panelGradient = ctx.createLinearGradient(panelX, finalPanelY, panelX, finalPanelY + panelHeight)
-    panelGradient.addColorStop(0, '#0e1f39')
-    panelGradient.addColorStop(1, '#101826')
-    ctx.fillStyle = panelGradient
-    ctx.beginPath()
-    ctx.roundRect(panelX, finalPanelY, panelWidth, panelHeight, overlay.cornerRadius)
-    ctx.fill()
-
-    ctx.fillStyle = 'rgba(8,16,31,0.94)'
-    ctx.beginPath()
-    ctx.roundRect(
-      panelX,
-      finalPanelY,
-      panelWidth,
-      titleHeight,
-      [overlay.cornerRadius, overlay.cornerRadius, 0, 0],
-    )
-    ctx.fill()
-
-    ctx.globalAlpha = 1
-    const textLeft = panelX + pad
-    const contentTop = finalPanelY + titleHeight + pad * 0.66
-
-    ctx.textAlign = 'left'
-    ctx.textBaseline = 'alphabetic'
-
-    if (overlay.showTitle) {
-      ctx.font = `700 ${Math.round(base * 0.86)}px Inter, system-ui, sans-serif`
-      ctx.fillStyle = '#f8fafc'
-      ctx.fillText('GPS MAP CAMERA  •  LOCATION VERIFIED', textLeft, finalPanelY + titleHeight * 0.68)
-    }
-
-    let cursorY = contentTop
-    for (const line of measured) {
-      ctx.font = `${line.weight} ${Math.round(line.size)}px Inter, system-ui, sans-serif`
-      ctx.fillStyle = line.dim ? 'rgba(241,245,249,0.94)' : '#ffffff'
-      cursorY += line.size
-      ctx.fillText(line.text, textLeft, cursorY)
-      cursorY += lineGap
-    }
-
-    cursorY += sectionGap * 0.5
-    if (detailsToDraw.length > 0) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      ctx.moveTo(textLeft, cursorY)
-      ctx.lineTo(textLeft + leftColumnWidth, cursorY)
-      ctx.stroke()
-      cursorY += sectionGap
-    }
-
-    ctx.font = `600 ${Math.round(base * 0.88)}px Inter, system-ui, sans-serif`
-    ctx.fillStyle = '#f8fafc'
-    for (const line of detailsToDraw) {
-      cursorY += base * 0.88
-      ctx.fillText(line, textLeft, cursorY)
-      cursorY += lineGap
-    }
-
-    if (overlay.showMap && mapSize > 0) {
-      const mapX = panelX + panelWidth - mapSize - pad
-      const mapY = finalPanelY + titleHeight + pad * 0.6
-      const mapRadius = Math.max(12, overlay.cornerRadius * 0.55)
-
-      ctx.save()
-      ctx.beginPath()
-      ctx.roundRect(mapX, mapY, mapSize, mapSize, mapRadius)
-      ctx.clip()
-
-      const mapCanvas = await drawMapTiles(location, Math.round(mapSize))
-      if (mapCanvas) {
-        ctx.drawImage(mapCanvas, mapX, mapY, mapSize, mapSize)
-        drawMarker(ctx, mapX, mapY, mapSize)
-      } else {
-        drawMapFallback(ctx, mapX, mapY, mapSize, location)
-      }
-
-      ctx.restore()
-
-      ctx.strokeStyle = 'rgba(255,255,255,0.34)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.roundRect(mapX, mapY, mapSize, mapSize, mapRadius)
-      ctx.stroke()
-    }
-
-    ctx.restore()
+  if (meta.length) {
+    const ruleY = y + panelH - metaH
+    ctx.strokeStyle = 'rgba(255,255,255,.16)'
+    ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(left, ruleY); ctx.lineTo(contentRight, ruleY); ctx.stroke()
+    ctx.font = `600 ${Math.round(base * .68)}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.82)'
+    const cols = portrait ? 1 : 2
+    const colW = (contentRight - left) / cols
+    const rows = Math.ceil(meta.length / cols)
+    const shown = meta.slice(0, rows * cols)
+    shown.forEach((item, i) => {
+      const col = i % cols
+      const row = Math.floor(i / cols)
+      const tx = left + col * colW
+      const ty = ruleY + base * .72 + row * base * .92
+      const line = wrap(ctx, item, colW - base * .5, 1)[0] || item
+      ctx.fillText(line, tx, ty)
+    })
   }
 
-  return await new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob ?? imageBlob), 'image/jpeg', 0.95)
-  })
+  if (mapSize) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(mapX, mapY, mapSize, Math.min(mapSize, panelH - pad * 2))
+    ctx.clip()
+    const map = await drawMap(location, mapSize)
+    if (map) ctx.drawImage(map, mapX, mapY, mapSize, mapSize)
+    else fallbackMap(ctx, mapX, mapY, mapSize, location)
+    ctx.restore()
+    ctx.strokeStyle = 'rgba(255,255,255,.38)'
+    ctx.lineWidth = 1
+    ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
+    ctx.font = `500 ${Math.max(7, base * .43)}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.45)'
+    ctx.textAlign = 'right'
+    ctx.fillText('© OpenStreetMap', width - pad, y + panelH - 4)
+  }
+
+  ctx.restore()
+  return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .95))
 }
 
 export const createThumbnail = async (blob: Blob): Promise<Blob> => {
   const img = await blobToImageBitmap(blob)
-  const { width, height } = getDimensions(img)
+  const { width, height } = dimensions(img)
   const ratio = Math.min(320 / width, 320 / height, 1)
   const canvas = document.createElement('canvas')
   canvas.width = Math.round(width * ratio)
@@ -514,8 +289,5 @@ export const createThumbnail = async (blob: Blob): Promise<Blob> => {
   const ctx = canvas.getContext('2d')
   if (!ctx) return blob
   ctx.drawImage(img as CanvasImageSource, 0, 0, canvas.width, canvas.height)
-
-  return await new Promise((resolve) => {
-    canvas.toBlob((thumb) => resolve(thumb ?? blob), 'image/jpeg', 0.9)
-  })
+  return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? blob), 'image/jpeg', .9))
 }
