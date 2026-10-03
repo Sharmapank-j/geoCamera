@@ -12,7 +12,7 @@ import { buildPhotoFilename, downloadBlob } from './utils/file'
 import './App.css'
 
 type Tab = 'camera' | 'gallery' | 'map' | 'settings'
-type IconName = 'camera' | 'image' | 'map' | 'settings' | 'refresh' | 'switch' | 'flash' | 'location' | 'download' | 'share' | 'trash' | 'edit' | 'x' | 'check' | 'search' | 'info' | 'upload'
+type IconName = 'camera' | 'image' | 'map' | 'settings' | 'refresh' | 'switch' | 'flash' | 'location' | 'download' | 'share' | 'trash' | 'edit' | 'x' | 'check' | 'search' | 'info' | 'upload' | 'sort'
 
 const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
   const paths: Record<IconName, string> = {
@@ -33,6 +33,7 @@ const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
     search: 'm20 20-4.5-4.5M9.5 17a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z',
     info: 'M12 17v-5m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
     upload: 'M12 16V4m0 0L8 8m4-4 4 4M5 20h14',
+    sort: 'M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3',
   }
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>
 }
@@ -70,6 +71,7 @@ const App = () => {
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoRecord | null>(null)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'geo' | 'no-geo'>('all')
+  const [sortOrder, setSortOrder] = useState<'newest' | 'oldest' | 'location'>('newest')
   const [busy, setBusy] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
   const previewCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -325,13 +327,24 @@ const App = () => {
     } catch { setCameraError('Backup is invalid or could not be read.') }
   }
 
-  const filteredPhotos = useMemo(() => photos.filter(p => {
-    if (filter === 'geo' && !p.hasLocation) return false
-    if (filter === 'no-geo' && p.hasLocation) return false
-    const q = search.trim().toLowerCase()
-    if (!q) return true
-    return [p.placeName, p.area, p.address, p.city, p.district, p.state, p.notes, p.fileName].some(v => v?.toLowerCase().includes(q))
-  }), [photos, filter, search])
+  const filteredPhotos = useMemo(() => {
+    const result = photos.filter(p => {
+      if (filter === 'geo' && !p.hasLocation) return false
+      if (filter === 'no-geo' && p.hasLocation) return false
+      const q = search.trim().toLowerCase()
+      if (!q) return true
+      return [p.placeName, p.area, p.address, p.city, p.district, p.state, p.notes, p.fileName].some(v => v?.toLowerCase().includes(q))
+    })
+    return [...result].sort((a, b) => {
+      if (sortOrder === 'oldest') return new Date(a.captureDateTime).getTime() - new Date(b.captureDateTime).getTime()
+      if (sortOrder === 'location') {
+        const aKey = (a.placeName || a.area || a.city || a.address || '').toLowerCase()
+        const bKey = (b.placeName || b.area || b.city || b.address || '').toLowerCase()
+        return aKey.localeCompare(bKey) || new Date(b.captureDateTime).getTime() - new Date(a.captureDateTime).getTime()
+      }
+      return new Date(b.captureDateTime).getTime() - new Date(a.captureDateTime).getTime()
+    })
+  }, [photos, filter, search, sortOrder])
 
   const storageMb = useMemo(() => (photos.reduce((n,p) => n + p.finalBlob.size + p.thumbnailBlob.size, 0) / 1048576).toFixed(1), [photos])
 
@@ -426,8 +439,14 @@ const App = () => {
           <section className="library-view">
             <header className="page-header"><div><p className="eyebrow">PRIVATE LIBRARY</p><h1>Gallery</h1></div><button className="primary-button compact" onClick={exportAll}><Icon name="download" size={17} /> Backup</button></header>
             <div className="searchbar"><Icon name="search" size={18}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search place, area, city or note" /></div>
-            <div className="filter-row">{(['all','geo','no-geo'] as const).map(f=><button key={f} className={filter===f?'filter active':'filter'} onClick={()=>setFilter(f)}>{f==='all'?'All':f==='geo'?'GPS':'No GPS'}</button>)}<span className="library-count">{filteredPhotos.length} photos</span></div>
-            {filteredPhotos.length === 0 ? <div className="empty-state"><Icon name="image" size={30}/><b>No photos yet</b><span>Captured photographs will appear here.</span></div> : <div className="photo-grid">{filteredPhotos.map(photo => <button className="photo-tile" key={photo.id} onClick={()=>setSelectedPhoto(photo)}><img src={URL.createObjectURL(photo.thumbnailBlob)} alt={photo.fileName}/><span className="photo-meta">{photo.hasLocation ? <><Icon name="location" size={12}/> {photo.area || photo.city || 'GPS'}</> : 'No GPS'}</span></button>)}</div>}
+            <div className="filter-row">
+              {(['all','geo','no-geo'] as const).map(f=><button key={f} className={filter===f?'filter active':'filter'} onClick={()=>setFilter(f)}>{f==='all'?'All':f==='geo'?'GPS':'No GPS'}</button>)}
+              <label className="gallery-sort"><Icon name="sort" size={15}/><span>Sort</span><select value={sortOrder} onChange={e=>setSortOrder(e.target.value as typeof sortOrder)} aria-label="Sort gallery">
+                <option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="location">Location</option>
+              </select></label>
+              <span className="library-count">{filteredPhotos.length} photos</span>
+            </div>
+            {filteredPhotos.length === 0 ? <div className="empty-state"><Icon name="image" size={30}/><b>No photos yet</b><span>Captured photographs will appear here.</span></div> : <div className="photo-grid">{filteredPhotos.map(photo => <button className="photo-tile" key={photo.id} onClick={()=>setSelectedPhoto(photo)}><img src={URL.createObjectURL(photo.thumbnailBlob)} alt={photo.fileName}/><span className="photo-time-badge"><b>{displayDatePretty(photo.captureDateTime)}</b><b>{new Date(photo.captureDateTime).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</b></span><span className="photo-meta">{photo.hasLocation ? <><Icon name="location" size={12}/> {photo.area || photo.city || 'GPS'}</> : 'No GPS'}</span></button>)}</div>}
             {selectedPhoto && <PhotoViewer photo={selectedPhoto} onClose={()=>setSelectedPhoto(null)} onDelete={async()=>{await deletePhoto(selectedPhoto.id);setSelectedPhoto(null);await refreshPhotos()}} onShare={async()=>shareFile(selectedPhoto)} />}
           </section>
         )}
