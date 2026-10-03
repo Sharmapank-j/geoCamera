@@ -127,41 +127,70 @@ const unique = (items: Array<string | undefined | null>) => {
   return out
 }
 
-const locationText = (location: LocationData) => {
-  const title = location.placeName?.trim() || location.area?.trim() || location.locality?.trim() ||
-    location.city?.trim() || location.district?.trim() || location.state?.trim() || 'GPS location'
-  const regionLine = unique([
-    location.area,
-    location.locality,
-    location.city,
-    location.district,
-    location.state,
-    location.countryCode || location.country,
-  ]).filter(x => x.toLowerCase() !== title.toLowerCase()).join(' ')
-  const address = location.address?.trim() ||
+
+const PLUS_CODE_ALPHABET = '23456789CFGHJMPQRVWX'
+
+const makePlusCode = (latitude: number, longitude: number) => {
+  const lat = Math.min(89.9999999, Math.max(-90, latitude)) + 90
+  const lon = ((longitude + 180) % 360 + 360) % 360
+  const resolutions = [20, 1, 0.05, 0.0025, 0.000125]
+  let latValue = lat
+  let lonValue = lon
+  let code = ''
+  for (const resolution of resolutions) {
+    const latIndex = Math.min(19, Math.floor(latValue / resolution))
+    const lonIndex = Math.min(19, Math.floor(lonValue / resolution))
+    code += PLUS_CODE_ALPHABET[latIndex] + PLUS_CODE_ALPHABET[lonIndex]
+    latValue -= latIndex * resolution
+    lonValue -= lonIndex * resolution
+  }
+  return `${code.slice(0, 8)}+${code.slice(8, 10)}`
+}
+
+const locationText = (location: LocationData) => ({
+  title: location.placeName?.trim() || 'GPS location',
+  area: location.area?.trim() || location.neighbourhood?.trim() || location.sublocality?.trim() || 'N/A',
+  locality: location.locality?.trim() || location.sublocality?.trim() || location.neighbourhood?.trim() || 'N/A',
+  city: location.city?.trim() || location.town?.trim() || location.village?.trim() || location.municipality?.trim() || 'N/A',
+  district: location.district?.trim() || 'N/A',
+  state: location.state?.trim() || location.region?.trim() || 'N/A',
+  country: location.country?.trim() || location.countryCode?.trim() || 'N/A',
+  postalCode: location.postalCode?.trim() || 'N/A',
+  address: location.address?.trim() ||
     unique([
       location.streetNumber && location.street ? `${location.streetNumber} ${location.street}` : undefined,
       location.street,
-    ]).join(', ')
-  return { title, regionLine, address }
-}
+      location.area,
+      location.city,
+      location.district,
+      location.state,
+      location.postalCode,
+      location.country,
+    ]).join(', ') || 'N/A',
+})
 
-const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: number) => {
-  const words = value.split(/\s+/).filter(Boolean)
-  const lines: string[] = []
-  let current = ''
-  for (const word of words) {
-    const next = current ? `${current} ${word}` : word
-    if (current && ctx.measureText(next).width > width) {
-      lines.push(current)
-      current = word
-      if (lines.length === max - 1) break
-    } else current = next
-  }
-  if (current && lines.length < max) lines.push(current)
-  return lines
-}
+const valueOrNA = (value: string | number | null | undefined) => value == null || value === '' ? 'N/A' : String(value)
 
+const renderField = (
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  value: string,
+  x: number,
+  y: number,
+  width: number,
+  labelSize: number,
+  valueSize: number,
+) => {
+  ctx.textAlign = 'left'
+  ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.45)'
+  ctx.fillText(label, x, y)
+  ctx.font = `650 ${valueSize}px Inter, Arial, sans-serif`
+  ctx.fillStyle = '#ffffff'
+  const lines = wrap(ctx, value, width, 2)
+  lines.forEach((line, i) => ctx.fillText(line, x, y + valueSize + 1 + i * (valueSize * .88)))
+  return lines.length
+}
 
 export const renderStampedPhoto = async ({
   imageBlob, location, overlay, appSettings, captureTimestamp,
@@ -173,132 +202,88 @@ export const renderStampedPhoto = async ({
   canvas.height = height
   const ctx = canvas.getContext('2d')
   if (!ctx) return imageBlob
+
+  // Draw the camera frame at native resolution first. The evidence panel is
+  // then rasterized directly onto that same native-resolution canvas.
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
   ctx.drawImage(source as CanvasImageSource, 0, 0, width, height)
-  if (!location) return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .95))
+
+  if (!location) return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .97))
 
   const portrait = height >= width
-  const scale = Math.max(1, width / 1080)
-  const pad = Math.max(18, Math.round(width * .022))
-  const mapSize = Math.round(Math.min(width * (portrait ? .27 : .22), 300))
-  const gap = Math.round(pad * .85)
-  const leftWidth = width - pad * 2 - mapSize - gap
+  const pad = Math.max(18, Math.round(width * .024))
+  const panelH = Math.round(height * (portrait ? .445 : .40))
+  const y = height - panelH
+  const mapSize = Math.round(Math.min(width * (portrait ? .25 : .24), 250))
+  const gap = Math.max(14, Math.round(width * .018))
+  const mapX = width - pad - mapSize
+  const mapY = y + pad + 36
+  const contentRight = mapX - gap
+  const leftWidth = contentRight - pad
+
   const lt = locationText(location)
   const stampTime = captureTimestamp ?? location.timestamp
-
-  const titleFont = Math.max(24, Math.round(width * .043))
-  const bodyFont = Math.max(15, Math.round(width * .023))
-  const labelFont = Math.max(10, Math.round(width * .015))
-  const smallFont = Math.max(11, Math.round(width * .018))
-  const valueFont = Math.max(13, Math.round(width * .020))
-
-  ctx.font = `800 ${titleFont}px Inter, system-ui, sans-serif`
-  const titleLines = wrap(ctx, lt.title, leftWidth, 2)
-  ctx.font = `650 ${bodyFont}px Inter, system-ui, sans-serif`
-  const regionLines = wrap(ctx, lt.regionLine, leftWidth, 2)
-  const addressLines = lt.address ? wrap(ctx, lt.address, leftWidth, 2) : []
-
-  const metadata: Array<[string, string]> = [
-    ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
-    ['LONGITUDE', location.longitude.toFixed(overlay.coordinatePrecision)],
-    ['ACCURACY', location.accuracy != null ? `±${Math.round(location.accuracy)} m` : 'N/A'],
-    ['DATE', displayDatePretty(stampTime)],
-    ['TIME', formatTime(stampTime, appSettings.use24Hour)],
-  ]
-  if (location.altitude != null) metadata.push(['ALTITUDE', `${location.altitude.toFixed(1)} m`])
-  if (location.heading != null && Number.isFinite(location.heading)) metadata.push(['HEADING', `${Math.round(location.heading)}°`])
-  if (location.speed != null && Number.isFinite(location.speed)) metadata.push(['SPEED', `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h`])
-  if (location.postalCode) metadata.push(['POSTAL CODE', location.postalCode])
-  if (location.plusCode) metadata.push(['PLUS CODE', location.plusCode])
-
-  const columns = 2
-  const rows = Math.ceil(metadata.length / columns)
-  const metaRowH = labelFont + valueFont + Math.max(8, Math.round(pad * .42))
-  const headerH = Math.max(42, Math.round(smallFont * 2.15))
-  const titleH = titleLines.length * titleFont * .92
-  const regionH = regionLines.length * bodyFont * .90
-  const addressH = addressLines.length ? addressLines.length * bodyFont * .84 : 0
-  const metaH = rows * metaRowH
-  const contentH = headerH + titleH + regionH + addressH + metaH + pad * 1.65
-  const panelH = Math.min(height * (portrait ? .38 : .36), Math.max(mapSize + pad * 2, contentH))
-  const y = height - panelH
-  const mapX = width - pad - mapSize
-  const mapY = y + pad
+  const labelSize = Math.max(10, Math.round(width * .014))
+  const valueSize = Math.max(14, Math.round(width * .019))
+  const titleSize = Math.max(25, Math.round(width * .042))
+  const bodySize = Math.max(13, Math.round(width * .017))
+  const headerSize = Math.max(10, Math.round(width * .014))
 
   ctx.save()
-  ctx.fillStyle = 'rgba(3,8,15,.95)'
+  ctx.fillStyle = 'rgba(3,8,15,.97)'
   ctx.fillRect(0, y, width, panelH)
 
-  // Documentary header rule and restrained accent.
+  // Strong documentary header.
   ctx.fillStyle = '#d6a33a'
-  ctx.fillRect(0, y, width, Math.max(3, Math.round(width * .0028)))
-
-  const left = pad
-  const right = mapX - gap
-  let cy = y + pad
-
-  ctx.font = `800 ${labelFont}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.72)'
+  ctx.fillRect(0, y, width, Math.max(3, Math.round(width * .003)))
+  ctx.font = `850 ${headerSize}px Inter, Arial, sans-serif`
+  ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'left'
-  ctx.fillText('GPS MAP CAMERA', left, cy + labelFont)
+  ctx.fillText('GPS MAP CAMERA', pad, y + pad + headerSize)
   ctx.textAlign = 'right'
-  ctx.fillStyle = 'rgba(255,255,255,.46)'
-  ctx.fillText('LOCATION VERIFIED', right, cy + labelFont)
-  cy += headerH
+  ctx.fillStyle = '#e2b85a'
+  ctx.fillText('LOCATION VERIFIED', width - pad, y + pad + headerSize)
 
+  // Place / landmark.
+  let top = y + pad + 36
   ctx.textAlign = 'left'
-  ctx.font = `800 ${titleFont}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = '#fff'
-  for (const line of titleLines) {
-    ctx.fillText(line, left, cy + titleFont * .82)
-    cy += titleFont * .90
-  }
+  ctx.font = `850 ${titleSize}px Inter, Arial, sans-serif`
+  ctx.fillStyle = '#ffffff'
+  const titleLines = wrap(ctx, lt.title, leftWidth, 2)
+  titleLines.forEach((line, i) => ctx.fillText(line, pad, top + titleSize * .82 + i * titleSize * .9))
+  top += titleLines.length * titleSize * .9 + 7
 
-  ctx.font = `650 ${bodyFont}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.86)'
-  for (const line of regionLines) {
-    ctx.fillText(line, left, cy + bodyFont * .82)
-    cy += bodyFont * .88
-  }
-
-  if (addressLines.length) {
-    ctx.font = `500 ${Math.max(12, Math.round(bodyFont * .84))}px Inter, system-ui, sans-serif`
-    ctx.fillStyle = 'rgba(255,255,255,.58)'
-    for (const line of addressLines) {
-      ctx.fillText(line, left, cy + bodyFont * .72)
-      cy += bodyFont * .78
-    }
-  }
-
-  const ruleY = y + panelH - metaH - pad * .55
-  ctx.strokeStyle = 'rgba(255,255,255,.16)'
-  ctx.lineWidth = Math.max(1, scale)
-  ctx.beginPath()
-  ctx.moveTo(left, ruleY)
-  ctx.lineTo(right, ruleY)
-  ctx.stroke()
-
-  const colWidth = (right - left - gap) / 2
-  metadata.forEach(([label, value], index) => {
-    const row = Math.floor(index / columns)
-    const col = index % columns
-    const x = left + col * (colWidth + gap)
-    const rowY = ruleY + row * metaRowH
-
+  // Explicit administrative hierarchy, never collapsed into a single ambiguous line.
+  const hierarchy = [
+    ['AREA / LOCALITY', `${lt.area}  /  ${lt.locality}`],
+    ['CITY / DISTRICT', `${lt.city}  /  ${lt.district}`],
+    ['STATE / COUNTRY', `${lt.state}  /  ${lt.country}`],
+    ['FULL ADDRESS', lt.address],
+  ]
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'
+  ctx.lineWidth = 1
+  hierarchy.forEach(([label, value]) => {
+    ctx.beginPath()
+    ctx.moveTo(pad, top - 5)
+    ctx.lineTo(contentRight, top - 5)
+    ctx.stroke()
+    ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.43)'
     ctx.textAlign = 'left'
-    ctx.font = `800 ${labelFont}px Inter, system-ui, sans-serif`
-    ctx.fillStyle = 'rgba(255,255,255,.42)'
-    ctx.fillText(label, x, rowY + labelFont)
-
-    ctx.font = `650 ${valueFont}px Inter, system-ui, sans-serif`
-    ctx.fillStyle = '#fff'
-    const valueLines = wrap(ctx, value, colWidth, 1)
-    ctx.fillText(valueLines[0] || '—', x, rowY + labelFont + valueFont + 1)
+    ctx.fillText(label, pad, top + labelSize)
+    ctx.font = `650 ${bodySize}px Inter, Arial, sans-serif`
+    ctx.fillStyle = '#ffffff'
+    const lines = wrap(ctx, value, leftWidth, label === 'FULL ADDRESS' ? 2 : 1)
+    lines.forEach((line, i) => ctx.fillText(line, pad, top + labelSize + bodySize + 1 + i * bodySize * .82))
+    top += labelSize + bodySize * (lines.length > 1 ? 1.75 : 1.25) + 7
   })
 
+  // Map inset.
   const map = await drawMap(location, mapSize)
   ctx.save()
   ctx.beginPath()
-  const radius = Math.max(10, Math.round(mapSize * .09))
+  const radius = Math.max(9, Math.round(mapSize * .07))
   ctx.moveTo(mapX + radius, mapY)
   ctx.arcTo(mapX + mapSize, mapY, mapX + mapSize, mapY + mapSize, radius)
   ctx.arcTo(mapX + mapSize, mapY + mapSize, mapX, mapY + mapSize, radius)
@@ -309,18 +294,58 @@ export const renderStampedPhoto = async ({
   if (map) ctx.drawImage(map, mapX, mapY, mapSize, mapSize)
   else fallbackMap(ctx, mapX, mapY, mapSize, location)
   ctx.restore()
-
-  ctx.strokeStyle = 'rgba(255,255,255,.45)'
-  ctx.lineWidth = Math.max(1, scale)
+  ctx.strokeStyle = 'rgba(255,255,255,.5)'
+  ctx.lineWidth = 1
   ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
-
-  ctx.font = `500 ${Math.max(8, labelFont * .75)}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.42)'
+  ctx.font = `500 ${Math.max(8, Math.round(labelSize * .75))}px Inter, Arial, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.45)'
   ctx.textAlign = 'right'
-  ctx.fillText('© OpenStreetMap', width - pad, y + panelH - 5)
-  ctx.restore()
+  ctx.fillText('© OpenStreetMap', mapX + mapSize - 6, mapY + mapSize - 5)
 
-  return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .95))
+  // Complete capture/evidence metadata. Every requested field is retained;
+  // unavailable sensor/address values are explicitly marked N/A rather than omitted.
+  const plusCode = location.plusCode?.trim() || makePlusCode(location.latitude, location.longitude)
+  const fields: Array<[string, string]> = [
+    ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
+    ['LONGITUDE', location.longitude.toFixed(overlay.coordinatePrecision)],
+    ['GPS ACCURACY', location.accuracy != null ? `±${Math.round(location.accuracy)} m` : 'N/A'],
+    ['DATE', displayDatePretty(stampTime)],
+    ['TIME', formatTime(stampTime, appSettings.use24Hour)],
+    ['ALTITUDE', location.altitude != null ? `${location.altitude.toFixed(1)} m` : 'N/A'],
+    ['HEADING', location.heading != null && Number.isFinite(location.heading) ? `${Math.round(location.heading)}°` : 'N/A'],
+    ['SPEED', location.speed != null && Number.isFinite(location.speed) ? `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h` : 'N/A'],
+    ['POSTAL CODE', valueOrNA(location.postalCode)],
+    ['PLUS CODE', plusCode],
+  ]
+
+  const metaTop = y + panelH - Math.round(labelSize + valueSize + 11) * 3 - pad - 6
+  const cols = 3
+  const colGap = Math.max(12, Math.round(width * .014))
+  const colW = (width - pad * 2 - colGap * 2) / cols
+  const rowH = Math.max(39, Math.round(labelSize + valueSize + 12))
+
+  ctx.strokeStyle = 'rgba(255,255,255,.14)'
+  ctx.beginPath()
+  ctx.moveTo(pad, metaTop - 9)
+  ctx.lineTo(width - pad, metaTop - 9)
+  ctx.stroke()
+
+  fields.forEach(([label, value], index) => {
+    const row = Math.floor(index / cols)
+    const col = index % cols
+    const x = pad + col * (colW + colGap)
+    const yy = metaTop + row * rowH
+    ctx.textAlign = 'left'
+    ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.43)'
+    ctx.fillText(label, x, yy + labelSize)
+    ctx.font = `700 ${valueSize}px Inter, Arial, sans-serif`
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(value, x, yy + labelSize + valueSize + 1)
+  })
+
+  ctx.restore()
+  return await new Promise(resolve => canvas.toBlob(b => resolve(b ?? imageBlob), 'image/jpeg', .97))
 }
 
 export const createThumbnail = async (blob: Blob): Promise<Blob> => {
