@@ -115,7 +115,8 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
   ])
   const area = different(areaCandidates, [city, district, a.state, a.country])
   const locality = different(areaCandidates, [area, city, district, a.state, a.country])
-  const placeName = result.name ?? a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house ?? a.leisure
+  const placeName = a.amenity ?? a.attraction ?? a.tourism ?? a.shop ?? a.building ?? a.office ?? a.house ?? a.leisure ??
+    (result.name && result.name.toLowerCase() !== a.road?.toLowerCase() ? result.name : undefined)
 
   return withResolved(location, {
     placeName,
@@ -168,13 +169,18 @@ interface BigDataCloudResult {
 }
 
 const normalizeBigDataCloud = (result: BigDataCloudResult): Partial<LocationData> => {
-  const admin = (result.localityInfo?.administrative ?? []).map(item => item.name?.trim()).filter((value): value is string => Boolean(value))
+  const admin = (result.localityInfo?.administrative ?? [])
+    .sort((a, b) => (a.order ?? Infinity) - (b.order ?? Infinity))
+    .map(item => item.name?.trim())
+    .filter((value): value is string => Boolean(value))
   const city = result.city?.trim() || result.locality?.trim()
-  const district = admin.find(value => /district|county/i.test(value))
   const candidates = unique([result.locality, ...admin])
+  const district = different(candidates, [city, result.principalSubdivision, result.countryName])
   return {
     area: different(candidates, [city, district, result.principalSubdivision, result.countryName]),
-    locality: different(candidates, [different(candidates, [city, district, result.principalSubdivision, result.countryName]), city, district, result.principalSubdivision, result.countryName]),
+    locality: result.locality?.trim() && result.locality.trim().toLowerCase() !== city?.toLowerCase()
+      ? result.locality.trim()
+      : undefined,
     city,
     district,
     state: result.principalSubdivision,
@@ -211,6 +217,7 @@ const reverseBigDataCloud = async (location: LocationData): Promise<Partial<Loca
 const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?: string) => {
   const components = result.address_components ?? []
   const pick = (...types: string[]) => components.find((c) => types.some((t) => c.types.includes(t)))?.long_name
+  const pickAny = (...types: string[]) => components.find((c) => types.some((t) => c.types.includes(t)))?.long_name
   const neighborhood = pick('neighborhood')
   const sublocalities = unique([
     pick('sublocality_level_3'),
@@ -219,16 +226,16 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
     pick('sublocality'),
   ])
   const sublocality = sublocalities[0]
-  const city = pick('locality', 'postal_town')
-  const district = pick('administrative_area_level_2')
+  const city = pick('locality', 'postal_town', 'administrative_area_level_3')
+  const district = pick('administrative_area_level_2', 'administrative_area_level_3')
   const state = pick('administrative_area_level_1')
   const countryComponent = components.find((c) => c.types.includes('country'))
-  const placeName = result.name ?? pick('establishment', 'premise', 'point_of_interest')
+  const placeName = result.name ?? pick('establishment', 'premise', 'point_of_interest', 'natural', 'park')
   const street = pick('route')
   // Prefer the finest named locality. A second distinct locality is retained
   // separately so the stamp can show multiple fine-grained localities.
   const area = different(
-    [neighborhood, ...sublocalities, pick('premise'), pick('establishment')],
+    [neighborhood, ...sublocalities, pick('premise'), pick('establishment'), pick('administrative_area_level_3')],
     [city, district, state, countryComponent?.long_name],
   )
   const locality = different(
@@ -258,7 +265,7 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
     city,
     district,
     state,
-    postalCode: pick('postal_code'),
+    postalCode: pickAny('postal_code'),
     country: countryComponent?.long_name,
     countryCode: countryComponent?.short_name,
     plusCode,
