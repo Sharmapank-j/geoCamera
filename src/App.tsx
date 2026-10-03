@@ -12,7 +12,7 @@ import { buildPhotoFilename, downloadBlob } from './utils/file'
 import './App.css'
 
 type Tab = 'camera' | 'gallery' | 'map' | 'settings'
-type IconName = 'camera' | 'image' | 'map' | 'settings' | 'refresh' | 'switch' | 'flash' | 'location' | 'download' | 'share' | 'trash' | 'edit' | 'x' | 'check' | 'search' | 'info' | 'upload' | 'sort'
+type IconName = 'camera' | 'image' | 'map' | 'settings' | 'refresh' | 'switch' | 'flash' | 'location' | 'download' | 'share' | 'trash' | 'edit' | 'x' | 'check' | 'search' | 'info' | 'upload' | 'sort' | 'shield' | 'signal'
 
 const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
   const paths: Record<IconName, string> = {
@@ -34,6 +34,8 @@ const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
     info: 'M12 17v-5m0-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z',
     upload: 'M12 16V4m0 0L8 8m4-4 4 4M5 20h14',
     sort: 'M7 4v16m0 0-3-3m3 3 3-3M17 20V4m0 0-3 3m3-3 3 3',
+    shield: 'M12 3 5 6v5c0 4.4 2.8 8.2 7 10 4.2-1.8 7-5.6 7-10V6l-7-3Zm0 5v4m0 4h.01',
+    signal: 'M4 19h2v-3H4v3Zm5 0h2v-7H9v7Zm5 0h2V8h-2v11Zm5 0h2V4h-2v15Z',
   }
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={paths[name]} /></svg>
 }
@@ -55,6 +57,7 @@ const App = () => {
   const [photos, setPhotos] = useState<PhotoRecord[]>([])
   const [activeTab, setActiveTab] = useState<Tab>('camera')
   const [cameraPermission, setCameraPermission] = useState<PermissionStateLabel>('Not granted')
+  const [locationDetails, setLocationDetails] = useState<LocationData | undefined>(undefined)
   const [locationPermission, setLocationPermission] = useState<PermissionStateLabel>('Not granted')
   const [storagePermission, setStoragePermission] = useState<StorageStateLabel>('Available')
   const [cameraError, setCameraError] = useState('')
