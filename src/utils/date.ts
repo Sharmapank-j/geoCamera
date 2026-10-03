@@ -33,3 +33,23 @@ export const displayDatePretty = (iso: string) => {
     year: 'numeric',
   })
 }
+
+export const displayDateLong = (iso: string) => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleDateString([], {
+    weekday: 'long',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  })
+}
+
+export const formatTimeZone = (iso: string) => {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const part = new Intl.DateTimeFormat([], { timeZoneName: 'shortOffset' })
+    .formatToParts(d)
+    .find(item => item.type === 'timeZoneName')?.value
+  return part || Intl.DateTimeFormat().resolvedOptions().timeZone
+}

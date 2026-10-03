@@ -219,8 +219,9 @@ const App = () => {
     let location: LocationData | undefined
     try {
       if (withLocation) location = await resolveLocation()
+      const captureDateTime = new Date().toISOString()
       const originalBlob = await captureVideoFrame(videoRef.current, nativeZoom ? 1 : zoom)
-      setDraft({ originalBlob, location, notes: '', captureDateTime: new Date().toISOString() })
+      setDraft({ originalBlob, location, notes: '', captureDateTime })
       stopStream(stream)
       setStream(null)
     } catch (e) {
