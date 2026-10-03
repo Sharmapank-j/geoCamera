@@ -139,6 +139,74 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
   })
 }
 
+
+
+const mergeDefined = (base: LocationData, ...parts: Array<Partial<LocationData>>): LocationData => {
+  const merged: LocationData = { ...base }
+  for (const part of parts) {
+    for (const [key, value] of Object.entries(part) as Array<[keyof LocationData, LocationData[keyof LocationData]]>) {
+      if (value !== undefined && value !== null && value !== '') merged[key] = value as never
+    }
+  }
+  return merged
+}
+
+interface BigDataCloudResult {
+  locality?: string
+  city?: string
+  principalSubdivision?: string
+  countryName?: string
+  countryCode?: string
+  postcode?: string
+  localityInfo?: {
+    administrative?: Array<{ name?: string; description?: string; order?: number }>
+  }
+}
+
+const normalizeBigDataCloud = (location: LocationData, result: BigDataCloudResult): Partial<LocationData> => {
+  const admin = (result.localityInfo?.administrative ?? []).map(item => item.name?.trim()).filter((value): value is string => Boolean(value))
+  const city = result.city?.trim() || result.locality?.trim()
+  const district = admin.find(value => /district|county/i.test(value))
+  const candidates = unique([result.locality, ...admin])
+  return {
+    area: different(candidates, [city, district, result.principalSubdivision, result.countryName]),
+    locality: different(candidates, [city, district, result.principalSubdivision, result.countryName]),
+    city,
+    district,
+    state: result.principalSubdivision,
+    postalCode: result.postcode,
+    country: result.countryName,
+    countryCode: result.countryCode,
+    provider: 'BigDataCloud',
+  }
+}
+
+const hasAddressData = (location: LocationData) => Boolean(
+  location.area || location.locality || location.city || location.district || location.state || location.country || location.address,
+)
+
+const reverseNominatim = async (location: LocationData): Promise<LocationData | undefined> => {
+  try {
+    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${location.latitude}&lon=${location.longitude}`, {
+      headers: { Accept: 'application/json', 'Accept-Language': navigator.language || 'en' },
+    })
+    if (!response.ok) return undefined
+    return normalizeNominatim(location, (await response.json()) as NominatimResult)
+  } catch {
+    return undefined
+  }
+}
+
+const reverseBigDataCloud = async (location: LocationData): Promise<Partial<LocationData>> => {
+  try {
+    const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${location.latitude}&longitude=${location.longitude}&localityLanguage=en`)
+    if (!response.ok) return {}
+    return normalizeBigDataCloud(location, (await response.json()) as BigDataCloudResult)
+  } catch {
+    return {}
+  }
+}
+
 const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?: string) => {
   const components = result.address_components ?? []
   const pick = (...types: string[]) => components.find((c) => types.some((t) => c.types.includes(t)))?.long_name
@@ -207,40 +275,17 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
         // Google can return the city but omit fine-grained Indian locality
         // components. Supplement only missing locality fields from Nominatim;
         // never replace Google's more specific values.
-        if (googleResolved.area || googleResolved.locality) {
-          return googleResolved
-        }
-        try {
-          const fallback = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${location.latitude}&lon=${location.longitude}`, {
-            headers: { Accept: 'application/json' },
-          })
-          if (fallback.ok) {
-            const osm = normalizeNominatim(location, (await fallback.json()) as NominatimResult)
-            return withResolved(location, {
-              ...googleResolved,
-              area: googleResolved.area ?? osm.area,
-              locality: googleResolved.locality ?? osm.locality,
-              neighbourhood: googleResolved.neighbourhood ?? osm.neighbourhood,
-              sublocality: googleResolved.sublocality ?? osm.sublocality,
-            })
-          }
-        } catch {
-          // Keep the valid Google result.
-        }
-        return googleResolved
+        const osm = await reverseNominatim(location)
+        const merged = mergeDefined(location, googleResolved, osm ?? {})
+        if (hasAddressData(merged)) return merged
+        return mergeDefined(location, googleResolved, osm ?? {}, await reverseBigDataCloud(location))
       }
     } catch {
       // fallback below
     }
   }
 
-  try {
-    const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&addressdetails=1&zoom=18&lat=${location.latitude}&lon=${location.longitude}`, {
-      headers: { Accept: 'application/json' },
-    })
-    if (!response.ok) return location
-    return normalizeNominatim(location, (await response.json()) as NominatimResult)
-  } catch {
-    return location
-  }
+  const osm = await reverseNominatim(location)
+  if (osm && hasAddressData(osm)) return osm
+  return mergeDefined(location, await reverseBigDataCloud(location))
 }
