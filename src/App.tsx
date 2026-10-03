@@ -68,6 +68,7 @@ const App = () => {
   const [storagePermission, setStoragePermission] = useState<StorageStateLabel>('Available')
   const [cameraError, setCameraError] = useState('')
   const [gpsStatus, setGpsStatus] = useState<GpsStatus>('LOCATION OFF')
+  const [gpsCaptureEnabled, setGpsCaptureEnabled] = useState(false)
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [facing, setFacing] = useState<CameraFacing>('environment')
   const [torch, setTorch] = useState(false)
@@ -191,6 +192,7 @@ const App = () => {
       if (settings.addressLookup && settings.allowExternalGeocoder && navigator.onLine) enriched = await reverseGeocode(location)
       setLocationPermission('Allowed')
       setGpsStatus(location.accuracy != null && location.accuracy > settings.lowAccuracyThresholdM ? 'LOW ACCURACY' : accuracyLabel(location))
+      setGpsCaptureEnabled(true)
       return enriched
     } catch (e) {
       const status = String(e)
@@ -338,24 +340,32 @@ const App = () => {
               <video ref={videoRef} autoPlay muted playsInline className={facing === 'user' && settings.mirrorFrontCamera ? 'mirrored' : ''} />
               <div className="camera-vignette" />
               <div className="camera-top safe-top">
-                <button className={`status-pill gps ${gpsTone}`} onClick={resolveLocation} title="Refresh GPS"><span className="status-dot" /><span>{gpsStatus}</span></button>
+                <button className={`location-card ${gpsTone}`} onClick={resolveLocation} title="Enable or refresh GPS">
+                  <span className="location-card-icon"><Icon name="location" size={22} /></span>
+                  <span className="location-card-copy"><b>{gpsStatus === 'LOCATION OFF' ? 'Location Off' : gpsStatus === 'LOCATING...' ? 'Locating…' : gpsStatus}</b><small>{gpsStatus === 'LOCATION OFF' ? 'Tap to enable GPS' : gpsStatus === 'LOW ACCURACY' ? 'Accuracy can be improved' : 'Tap to refresh location'}</small></span>
+                  <span className="location-chevron">›</span>
+                </button>
                 <div className="camera-actions">
-                  <button className="icon-button glass" onClick={toggleTorch} aria-label="Torch"><Icon name="flash" /></button>
-                  <button className="icon-button glass" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')} aria-label="Switch camera"><Icon name="switch" /></button>
-                  <button className="icon-button glass" onClick={() => setActiveTab('settings')} aria-label="Settings"><Icon name="settings" /></button>
+                  <button className={`icon-button camera-circle ${torch ? 'active' : ''}`} onClick={toggleTorch} aria-label="Torch"><Icon name="flash" /></button>
+                  <button className="icon-button camera-circle" onClick={() => startCamera(facing === 'environment' ? 'user' : 'environment')} aria-label="Switch camera"><Icon name="switch" /></button>
+                  <button className="icon-button camera-circle" onClick={() => setActiveTab('settings')} aria-label="Settings"><Icon name="settings" /></button>
                 </div>
               </div>
               {cameraError && <div className="camera-error glass">{cameraError}<button onClick={() => setCameraError('')}><Icon name="x" size={16} /></button></div>}
+              <div className="camera-focus-grid" aria-hidden="true">
+                <span className="focus-corner tl" /><span className="focus-corner tr" /><span className="focus-corner bl" /><span className="focus-corner br" /><span className="focus-cross" />
+              </div>
+              <div className="camera-zoom" aria-hidden="true"><span>3×</span><b>1×</b><span>0.5</span></div>
               <div className="camera-bottom safe-bottom">
-                <button className="round-action glass" onClick={() => setActiveTab('gallery')} aria-label="Gallery"><Icon name="image" /></button>
-                <button className="shutter-ring" onClick={() => capture(true)} disabled={busy} aria-label="Capture with GPS"><span className="shutter-core" /></button>
-                <button className="round-action glass" onClick={() => setActiveTab('map')} aria-label="Location map"><Icon name="map" /></button>
+                <button className="round-action camera-tool" onClick={() => setActiveTab('gallery')} aria-label="Gallery"><Icon name="image" /></button>
+                <button className="shutter-ring" onClick={() => capture(gpsCaptureEnabled)} disabled={busy} aria-label={gpsCaptureEnabled ? 'Capture with GPS' : 'Capture without GPS'}><span className="shutter-core" /></button>
+                <label className="round-action camera-tool" aria-label="Import photo"><Icon name="upload" /><input type="file" accept="image/*" hidden onChange={e => { const f=e.target.files?.[0]; if(f){setDraft({originalBlob:f,notes:'',captureDateTime:new Date().toISOString()}); stopStream(stream)}}} /></label>
               </div>
-              <div className="capture-options">
-                <button className="mode-chip active" onClick={() => capture(true)} disabled={busy}>GPS capture</button>
-                <button className="mode-chip" onClick={() => capture(false)} disabled={busy}>No GPS</button>
-                <label className="mode-chip"><Icon name="upload" size={15} /> Import<input type="file" accept="image/*" hidden onChange={e => { const f=e.target.files?.[0]; if(f){setDraft({originalBlob:f,notes:'',captureDateTime:new Date().toISOString()}); stopStream(stream)}}} /></label>
-              </div>
+              <button className={`gps-capture-switch ${gpsCaptureEnabled ? 'enabled' : ''}`} onClick={() => { if (!gpsCaptureEnabled) resolveLocation(); else setGpsCaptureEnabled(false) }} disabled={busy}>
+                <span className="gps-switch-icon"><Icon name="location" size={21} /></span>
+                <span><b>Capture with GPS</b><small>{gpsCaptureEnabled ? 'Location will be added to photo' : 'Adds location info to photo'}</small></span>
+                <span className="switch-track"><i /></span>
+              </button>
             </div>
           </section>
         )}
