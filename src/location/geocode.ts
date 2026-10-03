@@ -1,4 +1,5 @@
 import type { LocationData } from '../types'
+import { encodePlusCode } from '../utils/plusCode'
 
 type RawAddress = Record<string, string | undefined>
 
@@ -98,8 +99,7 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
   const a = result.address ?? {}
   const city = a.city ?? a.town ?? a.village ?? a.municipality
   const cityDistrict = a.city_district
-  // In Jamshedpur and similar Indian addresses, Nominatim can return the
-  // actual locality/area (for example "Golmuri-Cum-Jugsalai") as city_district.
+  // Nominatim can return the actual locality/area as city_district.
   // Keep the administrative district separate when available, but promote
   // city_district into the visible Area/Locality field.
   const district = a.county ?? a.state_district
@@ -136,7 +136,6 @@ const normalizeNominatim = (location: LocationData, result: NominatimResult) => 
     country: a.country,
     countryCode: a.country_code?.toUpperCase(),
     region: a.region,
-    plusCode: (result as NominatimResult & { extratags?: { 'addr:postcode'?: string } }).extratags?.['addr:postcode'],
     provider: 'OpenStreetMap Nominatim',
   })
 }
@@ -223,7 +222,7 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
   const countryComponent = components.find((c) => c.types.includes('country'))
   const placeName = result.name ?? pick('establishment', 'premise', 'point_of_interest')
   // Prefer the finest named locality. A second distinct locality is retained
-  // separately so the stamp can show e.g. "Luabasa / Ghorabanda".
+  // separately so the stamp can show multiple fine-grained localities.
   const area = different(
     [neighborhood, ...sublocalities, pick('premise'), pick('establishment')],
     [city, district, state, countryComponent?.long_name],
@@ -254,7 +253,15 @@ const normalizeGoogle = (location: LocationData, result: GoogleResult, plusCode?
 }
 
 export const reverseGeocode = async (location: LocationData): Promise<LocationData> => {
-  if (!navigator.onLine) return location
+  const withPlusCode = (resolved: LocationData) => ({
+    ...resolved,
+    plusCode: encodePlusCode(
+      resolved.latitude,
+      resolved.longitude,
+      Boolean(resolved.city || resolved.town || resolved.village || resolved.locality),
+    ) ?? resolved.plusCode,
+  })
+  if (!navigator.onLine) return withPlusCode(location)
 
   const googleKey = (import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined)?.trim()
   if (googleKey) {
@@ -279,7 +286,7 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
         // Fill missing fields from fallback providers without replacing
         // Google's more specific values. Provider order gives Google the
         // highest precedence, then Nominatim, then BigDataCloud.
-        return mergeDefined(location, bigDataCloud, osm ?? {}, googleResolved)
+        return withPlusCode(mergeDefined(location, bigDataCloud, osm ?? {}, googleResolved))
       }
     } catch {
       // fallback below
@@ -290,5 +297,5 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
   const bigDataCloud = await reverseBigDataCloud(location)
   // Do not stop just because one provider returned partial address data.
   // Merge all available fields so Area/Locality can be filled by a fallback.
-  return mergeDefined(location, bigDataCloud, osm ?? {})
+  return withPlusCode(mergeDefined(location, bigDataCloud, osm ?? {}))
 }

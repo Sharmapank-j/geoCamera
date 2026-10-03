@@ -1,5 +1,6 @@
 import type { AppSettings, LocationData, OverlaySettings } from '../types'
-import { displayDatePretty, formatTime } from '../utils/date'
+import { displayDateLong, formatTime, formatTimeZone } from '../utils/date'
+import { encodePlusCode } from '../utils/plusCode'
 
 interface StampInput {
   imageBlob: Blob
@@ -146,34 +147,15 @@ const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: 
   return lines
 }
 
-const PLUS_CODE_ALPHABET = '23456789CFGHJMPQRVWX'
-
-const makePlusCode = (latitude: number, longitude: number) => {
-  const lat = Math.min(89.9999999, Math.max(-90, latitude)) + 90
-  const lon = ((longitude + 180) % 360 + 360) % 360
-  const resolutions = [20, 1, 0.05, 0.0025, 0.000125]
-  let latValue = lat
-  let lonValue = lon
-  let code = ''
-  for (const resolution of resolutions) {
-    const latIndex = Math.min(19, Math.floor(latValue / resolution))
-    const lonIndex = Math.min(19, Math.floor(lonValue / resolution))
-    code += PLUS_CODE_ALPHABET[latIndex] + PLUS_CODE_ALPHABET[lonIndex]
-    latValue -= latIndex * resolution
-    lonValue -= lonIndex * resolution
-  }
-  return `${code.slice(0, 8)}+${code.slice(8, 10)}`
-}
-
 const locationText = (location: LocationData) => ({
-  title: location.placeName?.trim() || 'GPS location',
-  area: location.area?.trim() || location.neighbourhood?.trim() || location.sublocality?.trim() || 'N/A',
-  locality: location.locality?.trim() || location.sublocality?.trim() || location.neighbourhood?.trim() || 'N/A',
-  city: location.city?.trim() || location.town?.trim() || location.village?.trim() || location.municipality?.trim() || 'N/A',
-  district: location.district?.trim() || 'N/A',
-  state: location.state?.trim() || location.region?.trim() || 'N/A',
-  country: location.country?.trim() || location.countryCode?.trim() || 'N/A',
-  postalCode: location.postalCode?.trim() || 'N/A',
+  title: location.placeName?.trim() || location.area?.trim() || location.locality?.trim() || location.city?.trim() || 'GPS location',
+  area: location.area?.trim() || location.neighbourhood?.trim() || location.sublocality?.trim() || location.street?.trim(),
+  locality: location.locality?.trim() || location.sublocality?.trim() || location.neighbourhood?.trim(),
+  city: location.city?.trim() || location.town?.trim() || location.village?.trim() || location.municipality?.trim(),
+  district: location.district?.trim(),
+  state: location.state?.trim() || location.region?.trim(),
+  country: location.country?.trim() || location.countryCode?.trim(),
+  postalCode: location.postalCode?.trim(),
   address: location.address?.trim() ||
     unique([
       location.streetNumber && location.street ? `${location.streetNumber} ${location.street}` : undefined,
@@ -184,10 +166,8 @@ const locationText = (location: LocationData) => ({
       location.state,
       location.postalCode,
       location.country,
-    ]).join(', ') || 'N/A',
+    ]).join(', ') || undefined,
 })
-
-const valueOrNA = (value: string | number | null | undefined) => value == null || value === '' ? 'N/A' : String(value)
 
 export const renderStampedPhoto = async ({
   imageBlob, location, overlay, appSettings, captureTimestamp,
@@ -216,23 +196,9 @@ export const renderStampedPhoto = async ({
   const mapSize = Math.max(96, Math.round(Math.min(width * (portrait ? .145 : .16), panelH - pad * 2 - 28, 210)))
   const gap = Math.max(14, Math.round(width * .018))
   const lt = locationText(location)
-  const areaLocality = unique([
-    lt.area !== 'N/A' ? lt.area : undefined,
-    lt.locality !== 'N/A' ? lt.locality : undefined,
-  ]).join(' / ') || 'N/A'
+  const areaLocality = unique([lt.area, lt.locality]).join(' / ')
   const stampTime = captureTimestamp ?? location.timestamp
   const headerSize = Math.max(10, Math.round(width * .014))
-
-  // Strong documentary header.
-  ctx.fillStyle = '#d6a33a'
-  ctx.fillRect(0, y, width, Math.max(3, Math.round(width * .003)))
-  ctx.font = `850 ${headerSize}px Inter, Arial, sans-serif`
-  ctx.fillStyle = '#ffffff'
-  ctx.textAlign = 'left'
-  ctx.fillText('GPS MAP CAMERA', pad, y + pad + headerSize)
-  ctx.textAlign = 'right'
-  ctx.fillStyle = '#e2b85a'
-  ctx.fillText('LOCATION VERIFIED', width - pad, y + pad + headerSize)
 
   // Compact evidence layout: identity/address at left, map at right, all
   // capture metadata in a dense two-row footer. The panel stays within 25%.
@@ -256,7 +222,10 @@ export const renderStampedPhoto = async ({
   ctx.fillText('GPS MAP CAMERA', pad, y + pad + headerSize)
   ctx.textAlign = 'right'
   ctx.fillStyle = '#e2b85a'
-  ctx.fillText('LOCATION VERIFIED', width - pad, y + pad + headerSize)
+  const gpsQuality = location.accuracy == null
+    ? 'GPS FIX'
+    : location.accuracy <= appSettings.lowAccuracyThresholdM ? 'GPS VERIFIED' : 'LOW ACCURACY'
+  ctx.fillText(gpsQuality, width - pad, y + pad + headerSize)
 
   // Place / landmark.
   let top = y + pad + 27
@@ -269,11 +238,11 @@ export const renderStampedPhoto = async ({
 
   // Four essential location lines, compact and explicit.
   const compactLines: Array<[string, string]> = [
-    ['AREA / LOCALITY', areaLocality],
-    ['CITY / DISTRICT', `${lt.city} / ${lt.district}`],
-    ['STATE / COUNTRY', `${lt.state} / ${lt.country}`],
-    ['FULL ADDRESS', lt.address],
-  ]
+    [areaLocality ? 'AREA / LOCALITY' : '', areaLocality],
+    [unique([lt.city, lt.district]).join(' / ') ? 'CITY / DISTRICT' : '', unique([lt.city, lt.district]).join(' / ')],
+    [unique([lt.state, lt.country]).join(' / ') ? 'STATE / COUNTRY' : '', unique([lt.state, lt.country]).join(' / ')],
+    [lt.address ? 'FULL ADDRESS' : '', lt.address ?? ''],
+  ].filter((line): line is [string, string] => Boolean(line[0] && line[1]))
   const compactLabel = Math.max(7, Math.round(width * .009))
   const compactValue = Math.max(9, Math.round(width * .0115))
   const compactRow = Math.max(20, Math.round(panelH * .075))
@@ -286,7 +255,7 @@ export const renderStampedPhoto = async ({
     ctx.font = `650 ${compactValue}px Inter, Arial, sans-serif`
     ctx.fillStyle = '#ffffff'
     const lines = wrap(ctx, value, leftWidth, 1)
-    ctx.fillText(lines[0] || 'N/A', pad, yy + compactValue + 1)
+    ctx.fillText(lines[0] ?? '', pad, yy + compactValue + 1)
   })
 
   // Street map inset.
@@ -307,18 +276,23 @@ export const renderStampedPhoto = async ({
   ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
 
   // Complete metadata in two compact rows.
-  const plusCode = location.plusCode?.trim() || makePlusCode(location.latitude, location.longitude)
+  const plusCode = location.plusCode?.trim() || encodePlusCode(
+    location.latitude,
+    location.longitude,
+    Boolean(location.city || location.town || location.village || location.locality),
+  )
   const fields: Array<[string, string]> = [
     ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
     ['LONGITUDE', location.longitude.toFixed(overlay.coordinatePrecision)],
-    ['GPS ACCURACY', location.accuracy != null ? `±${Math.round(location.accuracy)} m` : 'N/A'],
-    ['DATE', displayDatePretty(stampTime)],
+    ...(location.accuracy != null ? [['GPS ACCURACY', `±${Math.round(location.accuracy)} m`] as [string, string]] : []),
+    ['DATE', displayDateLong(stampTime)],
     ['TIME', formatTime(stampTime, appSettings.use24Hour)],
-    ['ALTITUDE', location.altitude != null ? `${location.altitude.toFixed(1)} m` : 'N/A'],
-    ['HEADING', location.heading != null && Number.isFinite(location.heading) ? `${Math.round(location.heading)}°` : 'N/A'],
-    ['SPEED', location.speed != null && Number.isFinite(location.speed) ? `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h` : 'N/A'],
-    ['POSTAL CODE', valueOrNA(location.postalCode)],
-    ['PLUS CODE', plusCode],
+    ['TIME ZONE', formatTimeZone(stampTime)],
+    ...(location.altitude != null ? [['ALTITUDE', `${location.altitude.toFixed(1)} m`] as [string, string]] : []),
+    ...(location.heading != null && Number.isFinite(location.heading) ? [['HEADING', `${Math.round(location.heading)}°`] as [string, string]] : []),
+    ...(location.speed != null && Number.isFinite(location.speed) ? [['SPEED', `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h`] as [string, string]] : []),
+    ...(location.postalCode ? [['POSTAL CODE', location.postalCode] as [string, string]] : []),
+    ...(plusCode ? [['PLUS CODE', plusCode] as [string, string]] : []),
   ]
 
   const footerTop = y + panelH - Math.max(34, Math.round(panelH * .27))
