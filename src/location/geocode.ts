@@ -277,10 +277,8 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
         // never replace Google's more specific values.
         const osm = await reverseNominatim(location)
         const merged = mergeDefined(location, googleResolved, osm ?? {})
-        if (hasAddressData(merged)) {
-          return mergeDefined(merged, await reverseBigDataCloud(location))
-        }
-        return mergeDefined(location, googleResolved, osm ?? await reverseBigDataCloud(location))
+        if (hasAddressData(merged)) return merged
+        return mergeDefined(location, googleResolved, osm ?? {}, await reverseBigDataCloud(location))
       }
     } catch {
       // fallback below
@@ -288,6 +286,6 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
   }
 
   const osm = await reverseNominatim(location)
-  if (osm && hasAddressData(osm)) return mergeDefined(location, osm, await reverseBigDataCloud(location))
+  if (osm && hasAddressData(osm)) return osm
   return mergeDefined(location, await reverseBigDataCloud(location))
 }
