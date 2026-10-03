@@ -278,9 +278,11 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
         // components. Supplement only missing locality fields from Nominatim;
         // never replace Google's more specific values.
         const osm = await reverseNominatim(location)
-        const merged = mergeDefined(location, googleResolved, osm ?? {})
-        if (hasAddressData(merged)) return merged
-        return mergeDefined(location, googleResolved, osm ?? {}, await reverseBigDataCloud(location))
+        const bigDataCloud = await reverseBigDataCloud(location)
+        // Fill missing fields from fallback providers without replacing
+        // Google's more specific values. Provider order gives Google the
+        // highest precedence, then Nominatim, then BigDataCloud.
+        return mergeDefined(location, bigDataCloud, osm ?? {}, googleResolved)
       }
     } catch {
       // fallback below
@@ -288,6 +290,8 @@ export const reverseGeocode = async (location: LocationData): Promise<LocationDa
   }
 
   const osm = await reverseNominatim(location)
-  if (osm && hasAddressData(osm)) return osm
-  return mergeDefined(location, await reverseBigDataCloud(location))
+  const bigDataCloud = await reverseBigDataCloud(location)
+  // Do not stop just because one provider returned partial address data.
+  // Merge all available fields so Area/Locality can be filled by a fallback.
+  return mergeDefined(location, bigDataCloud, osm ?? {})
 }
