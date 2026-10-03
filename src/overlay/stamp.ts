@@ -188,6 +188,7 @@ export const renderStampedPhoto = async ({
   const titleFont = Math.max(24, Math.round(width * .043))
   const bodyFont = Math.max(15, Math.round(width * .023))
   const labelFont = Math.max(10, Math.round(width * .015))
+  const smallFont = Math.max(11, Math.round(width * .018))
   const valueFont = Math.max(13, Math.round(width * .020))
 
   ctx.font = `800 ${titleFont}px Inter, system-ui, sans-serif`
