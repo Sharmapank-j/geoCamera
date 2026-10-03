@@ -202,6 +202,7 @@ const App = () => {
       setLocationPermission('Allowed')
       setGpsStatus(location.accuracy != null && location.accuracy > settings.lowAccuracyThresholdM ? 'LOW ACCURACY' : accuracyLabel(location))
       setGpsCaptureEnabled(true)
+      setLocationDetails(enriched)
       return enriched
     } catch (e) {
       const status = String(e)
@@ -406,7 +407,7 @@ const App = () => {
               </div>
               <button className={`gps-capture-switch ${gpsCaptureEnabled ? 'enabled' : ''}`} onClick={() => { if (!gpsCaptureEnabled) resolveLocation(); else setGpsCaptureEnabled(false) }} disabled={busy}>
                 <span className="gps-switch-icon"><Icon name="location" size={21} /></span>
-                <span><b>Capture with GPS</b><small>{gpsCaptureEnabled ? 'Location will be added to photo' : 'Adds location info to photo'}</small></span>
+                <span><b>{gpsCaptureEnabled ? 'GPS tagging ready' : 'Tag photo with GPS'}</b><small>{gpsCaptureEnabled ? 'Fresh coordinates + place details will be burned in' : 'Tap to get a fresh location before capture'}</small></span>
                 <span className="switch-track"><i /></span>
               </button>
             </div>

@@ -736,3 +736,47 @@ body,
   .library-count { width:auto; }
   .photo-time-badge { top:6px; right:6px; padding:4px 6px; }
 }
+
+
+/* Top-notch setup + camera branding */
+.setup-screen{position:relative;justify-content:flex-start;min-height:100dvh;overflow:auto;padding-top:clamp(28px,7vh,72px);padding-bottom:30px}
+.setup-brand{display:flex;align-items:center;gap:16px}
+.setup-logo{width:76px;height:76px;border-radius:20px;box-shadow:0 14px 35px rgba(0,0,0,.32)}
+.setup-brand h1{margin:3px 0 0}
+.setup-copy{max-width:520px;font-size:15px}
+.setup-trust{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:18px 0}
+.setup-trust>div{display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 8px;border:1px solid var(--line);border-radius:12px;color:rgba(255,255,255,.7);background:rgba(255,255,255,.025);font-size:10px;font-weight:700}
+.permission-list{gap:9px}
+.permission-row{align-items:center;min-height:74px;padding:12px 13px}
+.permission-icon{display:grid;place-items:center;flex:0 0 42px;width:42px;height:42px;border-radius:13px;color:#6aa4ff;background:rgba(77,141,255,.11)}
+.permission-copy{flex:1;min-width:0}
+.permission-copy b{font-size:14px}
+.permission-copy small{font-size:11px}
+.permission-status{font-size:10px;font-weight:800;color:rgba(255,255,255,.5);white-space:nowrap}
+.status-allowed .permission-status{color:#55df92}
+.status-denied .permission-status{color:#ff7e7e}
+.status-persistent .permission-status{color:#55df92}
+.status-available .permission-status{color:#f4c95d}
+.setup-note{display:flex;gap:9px;margin:12px 0;padding:12px 13px;border:1px solid rgba(77,141,255,.2);border-radius:13px;color:rgba(255,255,255,.66);background:rgba(77,141,255,.06);font-size:11px;line-height:1.45}
+.setup-note svg{flex:0 0 auto;color:#6aa4ff}
+.camera-brand{position:absolute;z-index:5;left:16px;top:max(18px,env(safe-area-inset-top));display:flex;align-items:center;gap:8px;pointer-events:none}
+.camera-brand img{width:30px;height:30px;border-radius:8px;box-shadow:0 5px 14px rgba(0,0,0,.28)}
+.camera-brand span{font-size:10px;font-weight:850;letter-spacing:.16em;color:rgba(255,255,255,.84);text-shadow:0 2px 12px rgba(0,0,0,.45)}
+.gps-live-status{position:absolute;z-index:5;right:16px;top:max(19px,env(safe-area-inset-top));display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid rgba(255,255,255,.13);border-radius:999px;background:rgba(8,11,16,.52);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);font-size:10px;font-weight:800}
+.gps-live-status small{max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:rgba(255,255,255,.56);font-weight:600}
+.gps-live-dot{width:7px;height:7px;border-radius:50%;background:#7d8795;box-shadow:0 0 0 4px rgba(255,255,255,.05)}
+.gps-live-dot.good{background:#39df86;box-shadow:0 0 0 4px rgba(57,223,134,.12)}
+.gps-live-dot.warn{background:#f5c451;box-shadow:0 0 0 4px rgba(245,196,81,.1)}
+.gps-live-dot.danger{background:#ff7070;box-shadow:0 0 0 4px rgba(255,112,112,.1)}
+.gps-live-dot.muted{background:#7d8795}
+.gps-capture-switch.enabled{border-color:rgba(57,223,134,.28);box-shadow:0 10px 34px rgba(0,0,0,.3),0 0 0 1px rgba(57,223,134,.04)}
+@media(max-width:700px){
+  .setup-screen{padding-inline:16px}
+  .setup-brand{gap:12px}
+  .setup-logo{width:64px;height:64px;border-radius:17px}
+  .setup-brand h1{font-size:30px}
+  .setup-trust{gap:6px}
+  .setup-trust>div{padding:9px 4px;font-size:9px}
+  .camera-brand{left:12px}
+  .gps-live-status{right:12px;max-width:48vw}
+}
