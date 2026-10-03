@@ -372,18 +372,22 @@ const App = () => {
 
         {activeTab === 'camera' && draft && (
           <section className="editor-screen">
-            <header className="editor-header"><button className="icon-button glass" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }} aria-label="Retake"><Icon name="x" /></button><div><p className="eyebrow">CAPTURE PREVIEW</p><b>{draft.location ? placeSummary(draft.location).title : 'No location attached'}</b></div><button className="icon-button glass" onClick={saveDraft} disabled={busy}><Icon name="check" /></button></header>
+            <header className="editor-header">
+              <button className="icon-button glass" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }} aria-label="Retake"><Icon name="x" /></button>
+              <div><p className="eyebrow">CAPTURE PREVIEW</p><b>{draft.location ? placeSummary(draft.location).title : 'No location attached'}</b></div>
+              <button className="preview-save-button" onClick={saveDraft} disabled={busy}><Icon name="check" size={20} /> Save</button>
+            </header>
             <div className="preview-wrap"><canvas ref={previewCanvasRef} aria-label="Stamped photograph preview" /></div>
             <div className="editor-sheet">
-              <div className="sheet-handle" />
-              <div className="location-preview">
-                <Icon name="location" size={18} />
-                <div><b>{draft.location ? placeSummary(draft.location).title : 'Location not attached'}</b><small>{draft.location ? [draft.location.area, draft.location.city, draft.location.district, draft.location.state].filter(Boolean).join(' · ') : 'You can capture without GPS.'}</small></div>
+              <div className="location-preview location-preview-reference">
+                <Icon name="location" size={27} />
+                <div><b>{draft.location ? placeSummary(draft.location).title : 'Location not attached'}</b><small>{draft.location ? 'Using current GPS location' : 'You can capture without GPS.'}</small></div>
+                <button className="secondary-button refresh-inline" onClick={refreshLocation}><Icon name="refresh" size={17} /> Refresh location</button>
               </div>
-              <button className="secondary-button" onClick={refreshLocation}><Icon name="refresh" size={17} /> {draft.location ? 'Refresh location' : 'Use current location'}</button>
-              <div className="editor-row"><label>Stamp style<select value={overlay.preset} onChange={e => setOverlay(o => ({...o, ...presetProfiles[e.target.value], preset: e.target.value as OverlayPreset}))}>{presets.map(p => <option key={p}>{p}</option>)}</select></label><label>Opacity<input type="range" min=".55" max="1" step=".01" value={overlay.opacity} onChange={e => setOverlay(o=>({...o,opacity:Number(e.target.value)}))}/></label></div>
-              <label className="notes-field">Notes<textarea value={draft.notes} onChange={e => setDraft({...draft,notes:e.target.value})} placeholder="Optional note" /></label>
-              <div className="editor-actions"><button className="secondary-button" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }}>Retake</button><button className="primary-button" onClick={saveDraft} disabled={busy}>{busy ? 'Saving…' : 'Save photo'}</button></div>
+              <div className="editor-actions editor-actions-reference">
+                <button className="secondary-button" onClick={() => { setDraft(null); setStampedBlob(null); startCamera(facing) }}><Icon name="refresh" size={19} /> Retake</button>
+                <button className="primary-button" onClick={saveDraft} disabled={busy}><Icon name="check" size={19} /> {busy ? 'Saving…' : 'Save photo'}</button>
+              </div>
             </div>
           </section>
         )}
