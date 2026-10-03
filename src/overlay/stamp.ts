@@ -171,27 +171,6 @@ const locationText = (location: LocationData) => ({
 
 const valueOrNA = (value: string | number | null | undefined) => value == null || value === '' ? 'N/A' : String(value)
 
-const renderField = (
-  ctx: CanvasRenderingContext2D,
-  label: string,
-  value: string,
-  x: number,
-  y: number,
-  width: number,
-  labelSize: number,
-  valueSize: number,
-) => {
-  ctx.textAlign = 'left'
-  ctx.font = `800 ${labelSize}px Inter, Arial, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.45)'
-  ctx.fillText(label, x, y)
-  ctx.font = `650 ${valueSize}px Inter, Arial, sans-serif`
-  ctx.fillStyle = '#ffffff'
-  const lines = wrap(ctx, value, width, 2)
-  lines.forEach((line, i) => ctx.fillText(line, x, y + valueSize + 1 + i * (valueSize * .88)))
-  return lines.length
-}
-
 export const renderStampedPhoto = async ({
   imageBlob, location, overlay, appSettings, captureTimestamp,
 }: StampInput): Promise<Blob> => {
