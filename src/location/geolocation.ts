@@ -1,31 +1,21 @@
 import type { LocationData } from '../types'
 
-const toLocation = (position: GeolocationPosition): LocationData => {
-  const c = position.coords
+const toLocation = (position: GeolocationPosition): LocationData | undefined => {
+  const { coords } = position
+  if (!Number.isFinite(coords.latitude) || !Number.isFinite(coords.longitude)) return undefined
+  if (coords.latitude < -90 || coords.latitude > 90 || coords.longitude < -180 || coords.longitude > 180) return undefined
+
   return {
-    latitude: c.latitude,
-    longitude: c.longitude,
-    accuracy: c.accuracy,
-    altitude: c.altitude,
-    altitudeAccuracy: c.altitudeAccuracy,
-    heading: c.heading,
-    speed: c.speed,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    accuracy: Number.isFinite(coords.accuracy) && coords.accuracy >= 0 ? coords.accuracy : undefined,
+    altitude: coords.altitude,
+    altitudeAccuracy: coords.altitudeAccuracy,
+    heading: coords.heading,
+    speed: coords.speed,
     timestamp: new Date(position.timestamp).toISOString(),
   }
 }
-
-const request = (timeout: number, highAccuracy: boolean) =>
-  new Promise<GeolocationPosition>((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('LOCATION UNAVAILABLE'))
-      return
-    }
-    navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: highAccuracy,
-      maximumAge: 0,
-      timeout,
-    })
-  })
 
 const toError = (error: unknown) => {
   const code = (error as GeolocationPositionError).code
@@ -35,22 +25,87 @@ const toError = (error: unknown) => {
   return new Error('LOCATION UNAVAILABLE')
 }
 
+interface LocationOptions {
+  highAccuracy?: boolean
+  minimumAccuracy?: number
+}
+
+const collectFixes = (timeout: number, highAccuracy: boolean, minimumAccuracy: number) =>
+  new Promise<LocationData>((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('LOCATION UNAVAILABLE'))
+      return
+    }
+
+    const fixes: LocationData[] = []
+    let settled = false
+    let watchId: number | undefined
+    const startedAt = Date.now()
+    const minimumSamples = 2
+
+    const finish = (result?: LocationData, error?: Error) => {
+      if (settled) return
+      settled = true
+      if (watchId !== undefined) navigator.geolocation.clearWatch(watchId)
+      window.clearTimeout(timer)
+      if (result) resolve(result)
+      else reject(error ?? new Error('LOCATION UNAVAILABLE'))
+    }
+
+    const chooseBest = () => fixes.reduce((best, fix) => {
+      const bestAccuracy = best.accuracy ?? Infinity
+      const accuracy = fix.accuracy ?? Infinity
+      return accuracy < bestAccuracy ? fix : best
+    }, fixes[0])
+
+    const handlePosition = (position: GeolocationPosition) => {
+      const fix = toLocation(position)
+      if (!fix) return
+      fixes.push(fix)
+
+      const best = chooseBest()
+      const accuracy = best.accuracy
+      const elapsed = Date.now() - startedAt
+      if ((fixes.length >= minimumSamples && accuracy != null && accuracy <= minimumAccuracy) || elapsed >= timeout) {
+        finish(best)
+      }
+    }
+
+    const handleError = (error: GeolocationPositionError) => {
+      if (error.code === 1) finish(undefined, toError(error))
+      else if (Date.now() - startedAt >= timeout) finish(undefined, toError(error))
+    }
+
+    const timer = window.setTimeout(() => {
+      if (fixes.length) finish(chooseBest())
+      else finish(undefined, new Error('GPS TIMEOUT'))
+    }, timeout)
+
+    try {
+      // Always request fresh, high-accuracy data for a tag. The browser may
+      // still fall back to Wi-Fi/cell positioning, so the measured accuracy
+      // is retained and shown instead of being presented as precise GPS.
+      watchId = navigator.geolocation.watchPosition(handlePosition, handleError, {
+        enableHighAccuracy: highAccuracy,
+        maximumAge: 0,
+        timeout,
+      })
+    } catch (error) {
+      finish(undefined, toError(error))
+    }
+  })
+
 export const getCurrentLocation = async (
   timeout = 12000,
-  options: { highAccuracy?: boolean; minimumAccuracy?: number } = {},
+  options: LocationOptions = {},
 ): Promise<LocationData> => {
+  const safeTimeout = Math.max(5000, timeout)
   const highAccuracy = options.highAccuracy ?? true
-  const minimumAccuracy = options.minimumAccuracy ?? 50
+  const minimumAccuracy = Math.max(5, options.minimumAccuracy ?? 50)
   try {
-    const first = toLocation(await request(Math.min(timeout, 7000), highAccuracy))
-    if (first.accuracy == null || first.accuracy <= minimumAccuracy) return first
-    try {
-      const second = toLocation(await request(timeout, highAccuracy))
-      return (second.accuracy ?? Infinity) < (first.accuracy ?? Infinity) ? second : first
-    } catch {
-      return first
-    }
+    return await collectFixes(safeTimeout, highAccuracy, minimumAccuracy)
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('LOCATION ')) throw error
     throw toError(error)
   }
 }
