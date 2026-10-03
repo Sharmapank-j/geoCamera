@@ -39,16 +39,6 @@ const Icon = ({ name, size = 20 }: { name: IconName; size?: number }) => {
 
 const presets: OverlayPreset[] = ['Classic GPS', 'Modern', 'Minimal', 'Compact', 'Evidence', 'Travel', 'Professional', 'Custom']
 
-const presetProfiles: Record<string, Partial<OverlaySettings>> = {
-  'Classic GPS': { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .94, panelWidth: .97, cornerRadius: 6 },
-  Modern: { showTitle: true, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .86, panelWidth: .9, cornerRadius: 24 },
-  Minimal: { showTitle: false, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: false, showMap: false, opacity: .78, panelWidth: .88 },
-  Compact: { showTitle: false, showLocationName: true, showArea: true, showAddress: false, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: false, opacity: .82, panelWidth: .9 },
-  Evidence: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showAltitude: false, showHeading: false, showSpeed: false, showMap: true, opacity: .95, panelWidth: .97, mapSize: .24, cornerRadius: 4 },
-  Travel: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showMap: true, opacity: .84, panelWidth: .94, cornerRadius: 22 },
-  Professional: { showTitle: true, showLocationName: true, showArea: true, showAddress: true, showLatitude: true, showLongitude: true, showDate: true, showTime: true, showAccuracy: true, showAltitude: true, showMap: true, opacity: .94, panelWidth: .96, cornerRadius: 12 },
-}
-
 const accuracyLabel = (location?: LocationData): GpsStatus => location?.accuracy == null ? 'GPS READY' : `GPS ±${Math.round(location.accuracy)} m`
 
 const placeSummary = (p: Pick<LocationData, 'placeName' | 'area' | 'locality' | 'city'>) => {
