@@ -45,11 +45,13 @@ const different = (values: Array<string | undefined>, exclude: Array<string | un
   return unique(values).find((v) => !excluded.has(v.toLowerCase()))
 }
 
-const withResolved = (location: LocationData, resolved: Partial<LocationData>): LocationData => ({
-  ...location,
-  ...resolved,
-  resolvedAt: new Date().toISOString(),
-})
+const withResolved = (location: LocationData, resolved: Partial<LocationData>): LocationData => {
+  const merged: LocationData = { ...location }
+  for (const [key, value] of Object.entries(resolved) as Array<[keyof LocationData, LocationData[keyof LocationData]]>) {
+    if (value !== undefined && value !== null && value !== '') merged[key] = value as never
+  }
+  return { ...merged, resolvedAt: new Date().toISOString() }
+}
 
 const composeAddress = (parts: Array<string | undefined>) => unique(parts).join(', ')
 
@@ -163,14 +165,14 @@ interface BigDataCloudResult {
   }
 }
 
-const normalizeBigDataCloud = (location: LocationData, result: BigDataCloudResult): Partial<LocationData> => {
+const normalizeBigDataCloud = (result: BigDataCloudResult): Partial<LocationData> => {
   const admin = (result.localityInfo?.administrative ?? []).map(item => item.name?.trim()).filter((value): value is string => Boolean(value))
   const city = result.city?.trim() || result.locality?.trim()
   const district = admin.find(value => /district|county/i.test(value))
   const candidates = unique([result.locality, ...admin])
   return {
     area: different(candidates, [city, district, result.principalSubdivision, result.countryName]),
-    locality: different(candidates, [city, district, result.principalSubdivision, result.countryName]),
+    locality: different(candidates, [different(candidates, [city, district, result.principalSubdivision, result.countryName]), city, district, result.principalSubdivision, result.countryName]),
     city,
     district,
     state: result.principalSubdivision,
@@ -201,7 +203,7 @@ const reverseBigDataCloud = async (location: LocationData): Promise<Partial<Loca
   try {
     const response = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${location.latitude}&longitude=${location.longitude}&localityLanguage=en`)
     if (!response.ok) return {}
-    return normalizeBigDataCloud(location, (await response.json()) as BigDataCloudResult)
+    return normalizeBigDataCloud((await response.json()) as BigDataCloudResult)
   } catch {
     return {}
   }
