@@ -1,54 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#0B1B33"/>
-      <stop offset="1" stop-color="#020711"/>
-    </linearGradient>
-    <linearGradient id="body" x1="116" y1="132" x2="396" y2="386" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F8FAFC"/>
-      <stop offset="1" stop-color="#CBD5E1"/>
-    </linearGradient>
-    <linearGradient id="pin" x1="210" y1="112" x2="318" y2="380" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FF6B4A"/>
-      <stop offset=".48" stop-color="#EF3340"/>
-      <stop offset="1" stop-color="#B91C35"/>
-    </linearGradient>
-    <linearGradient id="lens" x1="224" y1="172" x2="294" y2="266" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#67E8F9"/>
-      <stop offset=".45" stop-color="#0284C7"/>
-      <stop offset="1" stop-color="#020617"/>
-    </linearGradient>
-    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
-
-  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
-  <rect x="22" y="22" width="468" height="468" rx="96" stroke="#3B82F6" stroke-opacity=".42" stroke-width="4"/>
-
-  <!-- Camera body -->
-  <path d="M106 170c0-22 18-40 40-40h68l24-38h36l24 38h68c22 0 40 18 40 40v184c0 22-18 40-40 40H146c-22 0-40-18-40-40V170Z"
-        fill="url(#body)" stroke="#94A3B8" stroke-width="6"/>
-  <rect x="128" y="190" width="256" height="142" rx="28" fill="#07101F"/>
-  <circle cx="360" cy="170" r="13" fill="#FFFFFF"/>
-
-  <!-- Map/target -->
-  <path d="M116 348l74-42 66 34 68-42 72 48" stroke="#38BDF8" stroke-opacity=".32" stroke-width="12" stroke-linecap="round"/>
-  <path d="M136 390l70-40 66 32 72-46" stroke="#34D399" stroke-opacity=".3" stroke-width="10" stroke-linecap="round"/>
-
-  <!-- Location pin integrated into camera lens -->
-  <g filter="url(#glow)">
-    <path d="M256 104c-61 0-110 48-110 108 0 78 110 174 110 174s110-96 110-174c0-60-49-108-110-108Z"
-          fill="url(#pin)" stroke="#7F1D2D" stroke-width="6"/>
-  </g>
-  <circle cx="256" cy="212" r="66" fill="#090F1B" stroke="#FCA5A5" stroke-opacity=".7" stroke-width="6"/>
-  <circle cx="256" cy="212" r="48" fill="#030712" stroke="#334155" stroke-width="7"/>
-  <circle cx="256" cy="212" r="35" fill="url(#lens)"/>
-  <circle cx="246" cy="201" r="11" fill="#E0F2FE" fill-opacity=".9"/>
-  <circle cx="256" cy="212" r="8" fill="#020617"/>
-
-  <!-- Location target -->
-  <circle cx="256" cy="386" r="18" fill="#EF3340" fill-opacity=".22"/>
-  <circle cx="256" cy="386" r="8" fill="#FFFFFF"/>
+  <rect width="512" height="512" rx="120" fill="#020617"/>
+  <rect x="76" y="128" width="360" height="260" rx="28" fill="#111827" stroke="#34d399" stroke-width="12"/>
+  <circle cx="256" cy="258" r="84" fill="#0f172a" stroke="#22d3ee" stroke-width="12"/>
+  <circle cx="256" cy="258" r="30" fill="#22d3ee"/>
+  <path d="M256 70L304 146H208L256 70Z" fill="#34d399"/>
+  <text x="256" y="442" fill="white" font-size="46" text-anchor="middle" font-family="Arial, sans-serif">GPS</text>
 </svg>
