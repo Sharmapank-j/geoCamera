@@ -259,6 +259,7 @@ export const renderStampedPhoto = async ({
     [cityDistrict ? 'CITY · DISTRICT' : '', cityDistrict],
     [stateCountryPostal ? 'STATE · COUNTRY · POSTAL' : '', stateCountryPostal],
     [lt.address ? 'FULL ADDRESS' : '', lt.address ?? ''],
+    [location.nearbyLandmarks?.length ? 'NEARBY LANDMARKS' : '', location.nearbyLandmarks?.join(' · ') ?? ''],
   ].filter((line): line is [string, string] => Boolean(line[0] && line[1]))
   const compactLabel = Math.max(7, Math.round(width * .009))
   const compactValue = Math.max(9, Math.round(width * .0115))
@@ -301,8 +302,6 @@ export const renderStampedPhoto = async ({
     ['TIME', formatTime(stampTime, appSettings.use24Hour)],
     ['TIME ZONE', formatTimeZone(stampTime)],
     ...(location.altitude != null ? [['ALTITUDE', `${location.altitude.toFixed(1)} m`] as [string, string]] : []),
-    ...(location.heading != null && Number.isFinite(location.heading) ? [['HEADING', `${Math.round(location.heading)}°`] as [string, string]] : []),
-    ...(location.speed != null && Number.isFinite(location.speed) ? [['SPEED', `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h`] as [string, string]] : []),
     ...(location.postalCode ? [['POSTAL CODE', location.postalCode] as [string, string]] : []),
     ...(plusCode ? [['PLUS CODE', plusCode] as [string, string]] : []),
   ]

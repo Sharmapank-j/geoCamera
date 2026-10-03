@@ -198,7 +198,7 @@ const App = () => {
   const resolveLocation = async (): Promise<LocationData | undefined> => {
     setGpsStatus('LOCATING...')
     try {
-      const location = await getCurrentLocation(settings.locationTimeoutMs, { highAccuracy: settings.locationHighAccuracy, minimumAccuracy: settings.lowAccuracyThresholdM })
+      const location = await getCurrentLocation(settings.locationTimeoutMs, { highAccuracy: true, minimumAccuracy: 20 })
       let enriched = location
       if (settings.addressLookup && settings.allowExternalGeocoder && navigator.onLine) enriched = await reverseGeocode(location)
       setLocationPermission('Allowed')

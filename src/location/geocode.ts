@@ -11,6 +11,14 @@ interface NominatimResult {
   lon?: string
 }
 
+interface NearbyOsmElement {
+  tags?: Record<string, string | undefined>
+}
+
+interface NearbyOsmResponse {
+  elements?: NearbyOsmElement[]
+}
+
 interface GoogleComponent {
   long_name: string
   short_name?: string
@@ -92,6 +100,29 @@ const nearbyGooglePlace = async (location: LocationData, key: string): Promise<P
     return { placeName: candidate.displayName.text }
   } catch {
     return {}
+  }
+}
+
+const nearbyOpenStreetMap = async (location: LocationData): Promise<string[]> => {
+  const query = `[out:json][timeout:3];(nwr(around:180,${location.latitude},${location.longitude})["name"];);out tags center;`
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 3500)
+  try {
+    const response = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    })
+    if (!response.ok) return []
+    const data = (await response.json()) as NearbyOsmResponse
+    return unique((data.elements ?? []).map(({ tags }) => {
+      if (!tags?.name) return undefined
+      const kind = tags.highway ? 'road' : tags.junction ? 'junction' : tags.building ? 'building' : tags.amenity ? 'place' : undefined
+      return kind ? `${tags.name} (${kind})` : tags.name
+    })).slice(0, 5)
+  } catch {
+    return []
+  } finally {
+    window.clearTimeout(timer)
   }
 }
 
@@ -198,7 +229,9 @@ const reverseNominatim = async (location: LocationData): Promise<LocationData | 
       headers: { Accept: 'application/json', 'Accept-Language': navigator.language || 'en' },
     })
     if (!response.ok) return undefined
-    return normalizeNominatim(location, (await response.json()) as NominatimResult)
+    const normalized = normalizeNominatim(location, (await response.json()) as NominatimResult)
+    const nearbyLandmarks = await nearbyOpenStreetMap(location)
+    return nearbyLandmarks.length ? withResolved(normalized, { nearbyLandmarks }) : normalized
   } catch {
     return undefined
   }
