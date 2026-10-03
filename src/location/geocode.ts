@@ -85,7 +85,7 @@ const nearbyGooglePlace = async (location: LocationData, key: string): Promise<P
       return typeof lat === 'number' && typeof lon === 'number' && distanceMeters(location.latitude, location.longitude, lat, lon) <= 120 && Boolean(place.displayName?.text)
     })
     if (!candidate?.displayName?.text) return {}
-    return { placeName: candidate.displayName.text, nearbyPlace: candidate.formattedAddress }
+    return { placeName: candidate.displayName.text }
   } catch {
     return {}
   }
