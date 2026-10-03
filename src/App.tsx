@@ -62,6 +62,9 @@ const App = () => {
   const [stream, setStream] = useState<MediaStream | null>(null)
   const [facing, setFacing] = useState<CameraFacing>('environment')
   const [torch, setTorch] = useState(false)
+  const [zoom, setZoom] = useState(1)
+  const [nativeZoom, setNativeZoom] = useState(false)
+  const [zoomOptions, setZoomOptions] = useState<number[]>([1, 2, 3])
   const [draft, setDraft] = useState<{ originalBlob: Blob; location?: LocationData; notes: string; captureDateTime: string } | null>(null)
   const [stampedBlob, setStampedBlob] = useState<Blob | null>(null)
   const [selectedPhoto, setSelectedPhoto] = useState<PhotoRecord | null>(null)
@@ -96,6 +99,20 @@ const App = () => {
       })
       setStream(media)
       setFacing(target)
+      setZoom(1)
+      const track = media.getVideoTracks()[0]
+      const capabilities = track?.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number; max: number; step?: number } }
+      const zoomCapability = capabilities?.zoom
+      if (zoomCapability) {
+        setNativeZoom(true)
+        const min = Number(zoomCapability.min)
+        const max = Number(zoomCapability.max)
+        const candidates = [0.5, 1, 2, 3, 5].filter(value => value >= min && value <= max)
+        setZoomOptions(Array.from(new Set(candidates.concat([1]).filter(value => value >= min && value <= max))).sort((a, b) => a - b))
+      } else {
+        setNativeZoom(false)
+        setZoomOptions([1, 2, 3])
+      }
       setCameraPermission('Allowed')
       setCameraError('')
       if (videoRef.current) videoRef.current.srcObject = media
@@ -198,7 +215,7 @@ const App = () => {
     let location: LocationData | undefined
     try {
       if (withLocation) location = await resolveLocation()
-      const originalBlob = await captureVideoFrame(videoRef.current)
+      const originalBlob = await captureVideoFrame(videoRef.current, nativeZoom ? 1 : zoom)
       setDraft({ originalBlob, location, notes: '', captureDateTime: new Date().toISOString() })
       stopStream(stream)
       setStream(null)
@@ -210,6 +227,23 @@ const App = () => {
   const refreshLocation = async () => {
     const loc = await resolveLocation()
     if (draft && loc) setDraft({ ...draft, location: loc })
+  }
+
+  const setCameraZoom = async (nextZoom: number) => {
+    const clamped = Math.max(1, nextZoom)
+    setZoom(clamped)
+    if (!nativeZoom || !stream) return
+    const track = stream.getVideoTracks()[0]
+    const capabilities = track?.getCapabilities() as MediaTrackCapabilities & { zoom?: { min: number; max: number } }
+    const range = capabilities?.zoom
+    if (!range) return
+    const value = Math.min(range.max, Math.max(range.min, nextZoom))
+    try {
+      await track.applyConstraints({ advanced: [{ zoom: value }] } as unknown as MediaTrackConstraints)
+      setZoom(value)
+    } catch {
+      setCameraError('Camera zoom could not be changed on this device.')
+    }
   }
 
   const toggleTorch = async () => {
@@ -345,7 +379,13 @@ const App = () => {
               <div className="camera-focus-grid" aria-hidden="true">
                 <span className="focus-corner tl" /><span className="focus-corner tr" /><span className="focus-corner bl" /><span className="focus-corner br" /><span className="focus-cross" />
               </div>
-              <div className="camera-zoom" aria-hidden="true"><span>3×</span><b>1×</b><span>0.5</span></div>
+              <div className="camera-zoom" aria-label="Camera zoom">
+                {zoomOptions.map(option => (
+                  <button key={option} className={Math.abs(zoom - option) < 0.01 ? 'active' : ''} onClick={() => setCameraZoom(option)} aria-label={`Zoom ${option} times`}>
+                    {option % 1 === 0 ? `${option}×` : `${option}×`}
+                  </button>
+                ))}
+              </div>
               <div className="camera-bottom safe-bottom">
                 <button className="round-action camera-tool" onClick={() => setActiveTab('gallery')} aria-label="Gallery"><Icon name="image" /></button>
                 <button className="shutter-ring" onClick={() => capture(gpsCaptureEnabled)} disabled={busy} aria-label={gpsCaptureEnabled ? 'Capture with GPS' : 'Capture without GPS'}><span className="shutter-core" /></button>

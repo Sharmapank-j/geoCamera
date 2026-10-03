@@ -179,86 +179,126 @@ export const renderStampedPhoto = async ({
   const portrait = height >= width
   const scale = Math.max(1, width / 1080)
   const pad = Math.max(18, Math.round(width * .022))
-  const mapSize = Math.round(Math.min(width * (portrait ? .285 : .22), 320))
-  const gap = Math.round(pad * .9)
-  const textWidth = width - pad * 2 - mapSize - gap
+  const mapSize = Math.round(Math.min(width * (portrait ? .27 : .22), 300))
+  const gap = Math.round(pad * .85)
+  const leftWidth = width - pad * 2 - mapSize - gap
   const lt = locationText(location)
   const stampTime = captureTimestamp ?? location.timestamp
 
-  const titleFont = Math.max(24, Math.round(width * .045))
-  const bodyFont = Math.max(16, Math.round(width * .026))
-  const smallFont = Math.max(12, Math.round(width * .018))
-  ctx.font = `700 ${titleFont}px Inter, system-ui, sans-serif`
-  const titleLines = wrap(ctx, lt.title, textWidth, 2)
-  ctx.font = `600 ${bodyFont}px Inter, system-ui, sans-serif`
-  const regionLines = wrap(ctx, lt.regionLine, textWidth, 2)
-  const addressLines = lt.address && lt.address !== lt.regionLine ? wrap(ctx, lt.address, textWidth, 1) : []
+  const titleFont = Math.max(24, Math.round(width * .043))
+  const bodyFont = Math.max(15, Math.round(width * .023))
+  const labelFont = Math.max(10, Math.round(width * .015))
+  const smallFont = Math.max(11, Math.round(width * .018))
+  const valueFont = Math.max(13, Math.round(width * .020))
 
-  const meta = [
-    `Latitude: ${location.latitude.toFixed(overlay.coordinatePrecision)}`,
-    `Longitude: ${location.longitude.toFixed(overlay.coordinatePrecision)}`,
-    `Date: ${displayDatePretty(stampTime)}`,
-    `Time: ${formatTime(stampTime, appSettings.use24Hour)}`,
+  ctx.font = `800 ${titleFont}px Inter, system-ui, sans-serif`
+  const titleLines = wrap(ctx, lt.title, leftWidth, 2)
+  ctx.font = `650 ${bodyFont}px Inter, system-ui, sans-serif`
+  const regionLines = wrap(ctx, lt.regionLine, leftWidth, 2)
+  const addressLines = lt.address ? wrap(ctx, lt.address, leftWidth, 2) : []
+
+  const metadata: Array<[string, string]> = [
+    ['LATITUDE', location.latitude.toFixed(overlay.coordinatePrecision)],
+    ['LONGITUDE', location.longitude.toFixed(overlay.coordinatePrecision)],
+    ['ACCURACY', location.accuracy != null ? `±${Math.round(location.accuracy)} m` : 'N/A'],
+    ['DATE', displayDatePretty(stampTime)],
+    ['TIME', formatTime(stampTime, appSettings.use24Hour)],
   ]
+  if (location.altitude != null) metadata.push(['ALTITUDE', `${location.altitude.toFixed(1)} m`])
+  if (location.heading != null && Number.isFinite(location.heading)) metadata.push(['HEADING', `${Math.round(location.heading)}°`])
+  if (location.speed != null && Number.isFinite(location.speed)) metadata.push(['SPEED', `${Math.max(0, location.speed * 3.6).toFixed(1)} km/h`])
+  if (location.postalCode) metadata.push(['POSTAL CODE', location.postalCode])
+  if (location.plusCode) metadata.push(['PLUS CODE', location.plusCode])
 
-  const headerH = Math.max(48, smallFont * 2.4)
-  const titleH = titleLines.length * titleFont * .98
-  const regionH = regionLines.length * bodyFont * .98
-  const addressH = addressLines.length ? bodyFont * 1.05 : 0
-  const metaH = bodyFont * 1.25 * 4
-  const contentH = headerH + titleH + regionH + addressH + metaH + pad * 2.2
-  const panelH = Math.min(height * (portrait ? .31 : .30), Math.max(mapSize + pad * 2, contentH))
+  const columns = 2
+  const rows = Math.ceil(metadata.length / columns)
+  const metaRowH = labelFont + valueFont + Math.max(8, Math.round(pad * .42))
+  const headerH = Math.max(42, Math.round(smallFont * 2.15))
+  const titleH = titleLines.length * titleFont * .92
+  const regionH = regionLines.length * bodyFont * .90
+  const addressH = addressLines.length ? addressLines.length * bodyFont * .84 : 0
+  const metaH = rows * metaRowH
+  const contentH = headerH + titleH + regionH + addressH + metaH + pad * 1.65
+  const panelH = Math.min(height * (portrait ? .38 : .36), Math.max(mapSize + pad * 2, contentH))
   const y = height - panelH
   const mapX = width - pad - mapSize
   const mapY = y + pad
 
   ctx.save()
-  ctx.fillStyle = 'rgba(3,8,15,.93)'
+  ctx.fillStyle = 'rgba(3,8,15,.95)'
   ctx.fillRect(0, y, width, panelH)
-  ctx.fillStyle = '#e2ad3b'
-  ctx.fillRect(0, y, width, Math.max(3, Math.round(width * .003)))
+
+  // Documentary header rule and restrained accent.
+  ctx.fillStyle = '#d6a33a'
+  ctx.fillRect(0, y, width, Math.max(3, Math.round(width * .0028)))
 
   const left = pad
   const right = mapX - gap
   let cy = y + pad
 
-  // Header: small, documentary-style branding.
-  ctx.font = `800 ${smallFont}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.78)'
+  ctx.font = `800 ${labelFont}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.72)'
   ctx.textAlign = 'left'
-  ctx.fillText('GPS MAP CAMERA', left, cy + smallFont)
+  ctx.fillText('GPS MAP CAMERA', left, cy + labelFont)
   ctx.textAlign = 'right'
-  ctx.fillStyle = 'rgba(255,255,255,.45)'
-  ctx.fillText('LOCATION VERIFIED', right, cy + smallFont)
+  ctx.fillStyle = 'rgba(255,255,255,.46)'
+  ctx.fillText('LOCATION VERIFIED', right, cy + labelFont)
   cy += headerH
 
   ctx.textAlign = 'left'
   ctx.font = `800 ${titleFont}px Inter, system-ui, sans-serif`
   ctx.fillStyle = '#fff'
-  for (const line of titleLines) { ctx.fillText(line, left, cy + titleFont * .82); cy += titleFont * .94 }
+  for (const line of titleLines) {
+    ctx.fillText(line, left, cy + titleFont * .82)
+    cy += titleFont * .90
+  }
 
   ctx.font = `650 ${bodyFont}px Inter, system-ui, sans-serif`
   ctx.fillStyle = 'rgba(255,255,255,.86)'
-  for (const line of regionLines) { ctx.fillText(line, left, cy + bodyFont * .86); cy += bodyFont * .94 }
-  for (const line of addressLines) { ctx.fillStyle = 'rgba(255,255,255,.62)'; ctx.fillText(line, left, cy + bodyFont * .82); cy += bodyFont * .9 }
+  for (const line of regionLines) {
+    ctx.fillText(line, left, cy + bodyFont * .82)
+    cy += bodyFont * .88
+  }
+
+  if (addressLines.length) {
+    ctx.font = `500 ${Math.max(12, Math.round(bodyFont * .84))}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.58)'
+    for (const line of addressLines) {
+      ctx.fillText(line, left, cy + bodyFont * .72)
+      cy += bodyFont * .78
+    }
+  }
 
   const ruleY = y + panelH - metaH - pad * .55
   ctx.strokeStyle = 'rgba(255,255,255,.16)'
   ctx.lineWidth = Math.max(1, scale)
-  ctx.beginPath(); ctx.moveTo(left, ruleY); ctx.lineTo(right, ruleY); ctx.stroke()
+  ctx.beginPath()
+  ctx.moveTo(left, ruleY)
+  ctx.lineTo(right, ruleY)
+  ctx.stroke()
 
-  ctx.font = `650 ${bodyFont}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = '#fff'
-  meta.forEach((item, i) => {
-    const row = i % 4
-    ctx.fillText(item, left, ruleY + bodyFont * 1.05 + row * bodyFont * 1.16)
+  const colWidth = (right - left - gap) / 2
+  metadata.forEach(([label, value], index) => {
+    const row = Math.floor(index / columns)
+    const col = index % columns
+    const x = left + col * (colWidth + gap)
+    const rowY = ruleY + row * metaRowH
+
+    ctx.textAlign = 'left'
+    ctx.font = `800 ${labelFont}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = 'rgba(255,255,255,.42)'
+    ctx.fillText(label, x, rowY + labelFont)
+
+    ctx.font = `650 ${valueFont}px Inter, system-ui, sans-serif`
+    ctx.fillStyle = '#fff'
+    const valueLines = wrap(ctx, value, colWidth, 1)
+    ctx.fillText(valueLines[0] || '—', x, rowY + labelFont + valueFont + 1)
   })
 
-  // Compact street-map inset: high enough zoom to expose nearby roads/blocks.
   const map = await drawMap(location, mapSize)
   ctx.save()
   ctx.beginPath()
-  const radius = Math.max(10, Math.round(mapSize * .10))
+  const radius = Math.max(10, Math.round(mapSize * .09))
   ctx.moveTo(mapX + radius, mapY)
   ctx.arcTo(mapX + mapSize, mapY, mapX + mapSize, mapY + mapSize, radius)
   ctx.arcTo(mapX + mapSize, mapY + mapSize, mapX, mapY + mapSize, radius)
@@ -269,12 +309,13 @@ export const renderStampedPhoto = async ({
   if (map) ctx.drawImage(map, mapX, mapY, mapSize, mapSize)
   else fallbackMap(ctx, mapX, mapY, mapSize, location)
   ctx.restore()
-  ctx.strokeStyle = 'rgba(255,255,255,.42)'
+
+  ctx.strokeStyle = 'rgba(255,255,255,.45)'
   ctx.lineWidth = Math.max(1, scale)
   ctx.strokeRect(mapX + .5, mapY + .5, mapSize - 1, mapSize - 1)
 
-  ctx.font = `500 ${Math.max(8, smallFont * .7)}px Inter, system-ui, sans-serif`
-  ctx.fillStyle = 'rgba(255,255,255,.45)'
+  ctx.font = `500 ${Math.max(8, labelFont * .75)}px Inter, system-ui, sans-serif`
+  ctx.fillStyle = 'rgba(255,255,255,.42)'
   ctx.textAlign = 'right'
   ctx.fillText('© OpenStreetMap', width - pad, y + panelH - 5)
   ctx.restore()

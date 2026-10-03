@@ -1,4 +1,4 @@
-export const captureVideoFrame = async (video: HTMLVideoElement): Promise<Blob> => {
+export const captureVideoFrame = async (video: HTMLVideoElement, zoom = 1): Promise<Blob> => {
   const width = video.videoWidth
   const height = video.videoHeight
 
@@ -12,7 +12,15 @@ export const captureVideoFrame = async (video: HTMLVideoElement): Promise<Blob> 
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Canvas unavailable')
 
-  ctx.drawImage(video, 0, 0, width, height)
+  if (zoom > 1) {
+    const cropWidth = width / zoom
+    const cropHeight = height / zoom
+    const cropX = (width - cropWidth) / 2
+    const cropY = (height - cropHeight) / 2
+    ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, width, height)
+  } else {
+    ctx.drawImage(video, 0, 0, width, height)
+  }
 
   return await new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {
