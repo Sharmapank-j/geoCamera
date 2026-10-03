@@ -128,6 +128,24 @@ const unique = (items: Array<string | undefined | null>) => {
 }
 
 
+const wrap = (ctx: CanvasRenderingContext2D, value: string, width: number, max: number) => {
+  const words = value.split(/\\s+/).filter(Boolean)
+  const lines: string[] = []
+  let current = ''
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word
+    if (current && ctx.measureText(next).width > width) {
+      lines.push(current)
+      current = word
+      if (lines.length === max - 1) break
+    } else {
+      current = next
+    }
+  }
+  if (current && lines.length < max) lines.push(current)
+  return lines
+}
+
 const PLUS_CODE_ALPHABET = '23456789CFGHJMPQRVWX'
 
 const makePlusCode = (latitude: number, longitude: number) => {
