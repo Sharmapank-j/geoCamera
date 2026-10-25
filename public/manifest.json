@@ -1,0 +1,26 @@
+{
+  "name": "GeoTag Camera",
+  "short_name": "GeoCamera",
+  "description": "Capture photos with GPS overlay — works fully offline. Your data stays on this device.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#111827",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["photo", "utilities"],
+  "screenshots": []
+}
