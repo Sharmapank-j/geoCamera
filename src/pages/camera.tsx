@@ -1,6 +1,6 @@
 // src/pages/camera.tsx
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { generateOverlay, OverlayMeta } from '@/lib/overlay';
+import { generateOverlay, OverlayMeta, toDMS, getHeadingString } from '@/lib/overlay';
 import { addPhoto } from '@/lib/localDB';
 import NavBar from '@/components/NavBar';
 import {
@@ -21,7 +21,11 @@ interface GpsData {
   latitude: number;
   longitude: number;
   accuracy: number;
+  altitude?: number;
+  heading?: number;
+  speed?: number;
   timestamp: number;
+  address?: string;
 }
 
 export default function CameraPage() {
@@ -37,10 +41,14 @@ export default function CameraPage() {
   const [previewURL, setPreviewURL] = useState<string | null>(null);
   const [activePreviewTab, setActivePreviewTab] = useState<'overlay' | 'raw'>('overlay');
 
-  // GPS state
+  // GPS & Telemetry state
   const [gps, setGps] = useState<GpsData | null>(null);
+  const [deviceHeading, setDeviceHeading] = useState<number | undefined>(undefined);
   const [isGettingGps, setIsGettingGps] = useState(false);
   const [autoGps, setAutoGps] = useState(false);
+
+  // User Project/Site Note
+  const [noteText, setNoteText] = useState('');
 
   // Camera settings & controls
   const [gridMode, setGridMode] = useState<GridMode>('3x3');
@@ -57,6 +65,25 @@ export default function CameraPage() {
   // Read stored preferences on mount
   useEffect(() => {
     setAutoGps(getAutoGpsEnabled());
+
+    // Listen for compass heading if available on device
+    const handleOrientation = (e: DeviceOrientationEvent) => {
+      // webkitCompassHeading on iOS, or alpha on Android
+      const heading = (e as any).webkitCompassHeading || (e.alpha ? 360 - e.alpha : undefined);
+      if (heading !== undefined && !isNaN(heading)) {
+        setDeviceHeading(Math.round(heading));
+      }
+    };
+
+    if (typeof window !== 'undefined' && 'DeviceOrientationEvent' in window) {
+      window.addEventListener('deviceorientation', handleOrientation, true);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('deviceorientation', handleOrientation, true);
+      }
+    };
   }, []);
 
   // ── Camera stream management ────────────────────────────────────────────────
@@ -99,7 +126,7 @@ export default function CameraPage() {
     };
   }, [previewURL]);
 
-  // ── GPS Acquisition ──────────────────────────────────────────────────────────
+  // ── GPS Acquisition with Telemetry ───────────────────────────────────────────
   const fetchGps = useCallback((): Promise<GpsData | null> => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
@@ -109,13 +136,39 @@ export default function CameraPage() {
       }
       setIsGettingGps(true);
       navigator.geolocation.getCurrentPosition(
-        (pos) => {
+        async (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+
+          // Attempt fast reverse geocode if network is reachable (3s timeout)
+          let resolvedAddress: string | undefined = undefined;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000);
+            const res = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+              { signal: controller.signal }
+            );
+            clearTimeout(timeoutId);
+            if (res.ok) {
+              const data = await res.json();
+              resolvedAddress = data.display_name?.split(',').slice(0, 3).join(', ');
+            }
+          } catch {
+            // Offline fallback: ignore reverse geocoding errors
+          }
+
           const gpsData: GpsData = {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
+            latitude: lat,
+            longitude: lng,
             accuracy: pos.coords.accuracy,
+            altitude: pos.coords.altitude ?? undefined,
+            heading: pos.coords.heading ?? deviceHeading ?? undefined,
+            speed: pos.coords.speed ?? undefined,
             timestamp: pos.timestamp,
+            address: resolvedAddress,
           };
+
           setGps(gpsData);
           setIsGettingGps(false);
           resolve(gpsData);
@@ -128,11 +181,11 @@ export default function CameraPage() {
         {
           enableHighAccuracy: getHighAccuracyEnabled(),
           timeout: 12000,
-          maximumAge: 10000,
+          maximumAge: 5000,
         }
       );
     });
-  }, []);
+  }, [deviceHeading]);
 
   const handleManualGpsTrigger = async () => {
     triggerHaptic('medium');
@@ -176,7 +229,6 @@ export default function CameraPage() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
-    // Trigger visual flash, shutter sound, and tactile haptic vibration burst!
     setShutterFlashing(true);
     playShutterSound();
     triggerHaptic('shutter');
@@ -200,14 +252,12 @@ export default function CameraPage() {
         setCapturedBlob(blob);
         setFinalBlob(null);
 
-        // Check if Auto-GPS is enabled
         let currentGps = gps;
         if (autoGps && !currentGps) {
           currentGps = await fetchGps();
         }
 
-        // Generate initial overlay
-        await rebuildOverlay(blob, currentGps, overlayStyle);
+        await rebuildOverlay(blob, currentGps, overlayStyle, noteText);
 
         setMode('preview');
         setActivePreviewTab('overlay');
@@ -226,26 +276,32 @@ export default function CameraPage() {
     setCapturedBlob(blob);
     setFinalBlob(null);
     setGps(null);
-    rebuildOverlay(blob, null, overlayStyle);
+    rebuildOverlay(blob, null, overlayStyle, noteText);
     setMode('preview');
     e.target.value = '';
   };
 
-  // ── Rebuild Overlay with Style ────────────────────────────────────────────────
+  // ── Rebuild Overlay with Rich Telemetry ──────────────────────────────────────
   const rebuildOverlay = async (
     blob: Blob,
     gpsData?: GpsData | null,
-    style: OverlayStyle = 'pro'
+    style: OverlayStyle = 'pro',
+    customNote: string = noteText
   ) => {
     setIsProcessing(true);
     try {
       const meta: OverlayMeta = {
         capturedAt: gpsData ? new Date(gpsData.timestamp).toISOString() : new Date().toISOString(),
         style,
+        note: customNote.trim() || undefined,
+        address: gpsData?.address,
         ...(gpsData && {
           latitude: gpsData.latitude,
           longitude: gpsData.longitude,
           accuracy: gpsData.accuracy,
+          altitude: gpsData.altitude,
+          heading: gpsData.heading ?? deviceHeading,
+          speed: gpsData.speed,
         }),
       };
       const overlaid = await generateOverlay(blob, meta);
@@ -264,7 +320,14 @@ export default function CameraPage() {
     triggerHaptic('selection');
     setOverlayStyle(newStyle);
     if (capturedBlob) {
-      rebuildOverlay(capturedBlob, gps, newStyle);
+      rebuildOverlay(capturedBlob, gps, newStyle, noteText);
+    }
+  };
+
+  const handleNoteChange = (text: string) => {
+    setNoteText(text);
+    if (capturedBlob) {
+      rebuildOverlay(capturedBlob, gps, overlayStyle, text);
     }
   };
 
@@ -274,7 +337,7 @@ export default function CameraPage() {
     const data = await fetchGps();
     if (data && capturedBlob) {
       triggerHaptic('success');
-      await rebuildOverlay(capturedBlob, data, overlayStyle);
+      await rebuildOverlay(capturedBlob, data, overlayStyle, noteText);
     }
   };
 
@@ -292,6 +355,7 @@ export default function CameraPage() {
           finalToSave = await generateOverlay(blobToSave, {
             capturedAt: new Date().toISOString(),
             style: overlayStyle,
+            note: noteText.trim() || undefined,
           });
         } catch {
           finalToSave = blobToSave;
@@ -305,6 +369,7 @@ export default function CameraPage() {
         latitude: gps?.latitude,
         longitude: gps?.longitude,
         accuracy: gps?.accuracy,
+        address: gps?.address || (noteText.trim() ? noteText.trim() : undefined),
         capturedAt: gps ? new Date(gps.timestamp).toISOString() : new Date().toISOString(),
       });
 
@@ -343,14 +408,14 @@ export default function CameraPage() {
       try {
         await navigator.share({
           files: [file],
-          title: 'GeoTag Camera',
+          title: 'GeoTag Camera Pro',
           text: gps
-            ? `📍 ${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`
+            ? `📍 ${gps.latitude.toFixed(6)}, ${gps.longitude.toFixed(6)} (${toDMS(gps.latitude, true)}, ${toDMS(gps.longitude, false)})`
             : 'Photo from GeoTag Camera',
         });
         triggerHaptic('success');
-      } catch (e: any) {
-        if (e.name !== 'AbortError') triggerHaptic('warning');
+      } catch (err: any) {
+        if (err.name !== 'AbortError') triggerHaptic('warning');
       }
     } else {
       triggerHaptic('warning');
@@ -358,13 +423,13 @@ export default function CameraPage() {
     }
   };
 
-  // ── Retake & Reset ───────────────────────────────────────────────────────────
   const retake = () => {
     triggerHaptic('light');
     if (previewURL) URL.revokeObjectURL(previewURL);
     setCapturedBlob(null);
     setFinalBlob(null);
     setPreviewURL(null);
+    setNoteText('');
     setStatus('');
     setMode('camera');
   };
@@ -400,13 +465,13 @@ export default function CameraPage() {
       <header className="flex items-center justify-between px-3.5 pt-3 pb-2.5 z-20">
         <div className="flex items-center gap-2">
           <span className="text-base font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-300 bg-clip-text text-transparent">
-            📍 GeoTag Camera
+            📍 GeoTag Camera Pro
           </span>
         </div>
 
         {mode === 'camera' && (
           <div className="flex items-center gap-1.5">
-            {/* Auto GPS Toggle Pill */}
+            {/* Auto GPS Toggle */}
             <button
               onClick={toggleAutoGpsSetting}
               className={`btn-press px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all ${
@@ -428,7 +493,6 @@ export default function CameraPage() {
                   ? 'bg-blue-600/30 text-blue-400 border border-blue-500/40'
                   : 'bg-gray-800/70 text-gray-400 hover:text-white'
               }`}
-              aria-label="Toggle grid"
               title="Grid overlay"
             >
               {gridMode === 'none' ? '# Off' : gridMode === '3x3' ? '3×3' : '✚'}
@@ -442,7 +506,6 @@ export default function CameraPage() {
                   ? 'bg-amber-600/30 text-amber-300 border border-amber-500/40'
                   : 'bg-gray-800/70 text-gray-400 hover:text-white'
               }`}
-              aria-label="Toggle timer"
               title="Self timer"
             >
               {timerDuration > 0 ? `⏱ ${timerDuration}s` : '⏱ Off'}
@@ -452,7 +515,6 @@ export default function CameraPage() {
             <button
               onClick={switchCamera}
               className="btn-press p-2 rounded-full bg-gray-800/80 hover:bg-gray-700 text-white transition active:rotate-180"
-              aria-label="Switch camera"
               title="Switch camera"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
@@ -463,16 +525,16 @@ export default function CameraPage() {
         )}
       </header>
 
-      {/* Status & Saved banners */}
+      {/* Status banner */}
       {status && (
-        <div className="mx-4 mb-2 px-3.5 py-2 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-center justify-between animate-fade-in">
+        <div className="mx-4 mb-2 px-3.5 py-2 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-center justify-between">
           <span>{status}</span>
           <button onClick={() => setStatus('')} className="p-1 font-bold text-red-400">✕</button>
         </div>
       )}
       {savedMsg && (
         <div className="mx-4 mb-2 px-3.5 py-2 rounded-xl bg-emerald-950/90 border border-emerald-600 text-emerald-200 text-xs font-semibold flex items-center gap-2">
-          <span className="text-base">✓</span>
+          <span>✓</span>
           <span>{savedMsg}</span>
         </div>
       )}
@@ -480,7 +542,6 @@ export default function CameraPage() {
       {/* ── CAMERA MODE ── */}
       {mode === 'camera' && (
         <div className="flex-1 flex flex-col relative">
-          {/* Live Viewfinder */}
           <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
             <video
               ref={videoRef}
@@ -490,7 +551,7 @@ export default function CameraPage() {
               className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
             />
 
-            {/* Shutter White Flash Effect */}
+            {/* Shutter White Flash */}
             {shutterFlashing && (
               <div className="absolute inset-0 bg-white z-30 animate-shutter-flash pointer-events-none" />
             )}
@@ -521,34 +582,39 @@ export default function CameraPage() {
               </div>
             )}
 
-            {/* Live GPS Lock Indicator Pill on top of viewfinder */}
+            {/* Top Viewfinder Telemetry Pill */}
             <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none z-10">
               <button
                 onClick={handleManualGpsTrigger}
-                className="pointer-events-auto btn-press glass-dark px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-mono shadow-lg border border-white/10"
+                className="pointer-events-auto btn-press glass-dark px-3.5 py-1.5 rounded-full flex items-center gap-2 text-xs font-mono shadow-lg border border-white/10"
               >
                 {isGettingGps ? (
                   <>
                     <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-radar-ping" />
                     <span className="text-amber-300 font-sans font-medium text-[11px]">
-                      Locking GPS…
+                      Acquiring GPS Fix…
                     </span>
                   </>
                 ) : gps ? (
                   <>
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-emerald-300 font-semibold text-[11px]">
-                      {gps.latitude.toFixed(4)}°, {gps.longitude.toFixed(4)}°
+                    <span className="text-emerald-300 font-bold text-[11px]">
+                      {gps.latitude.toFixed(5)}°, {gps.longitude.toFixed(5)}°
                     </span>
-                    <span className="text-gray-400 text-[10px] font-sans">
-                      (±{gps.accuracy.toFixed(0)}m)
+                    <span className="text-blue-300 text-[10px] font-sans">
+                      ±{gps.accuracy.toFixed(0)}m
                     </span>
+                    {deviceHeading !== undefined && (
+                      <span className="text-amber-300 text-[10px] font-mono">
+                        🧭 {getHeadingString(deviceHeading)}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <>
                     <span className="w-2 h-2 rounded-full bg-gray-500" />
                     <span className="text-gray-300 font-sans text-[11px]">
-                      Tap to acquire GPS
+                      Tap to acquire GPS Telemetry
                     </span>
                   </>
                 )}
@@ -556,16 +622,14 @@ export default function CameraPage() {
             </div>
           </div>
 
-          {/* Bottom Shutter & Controls Dock */}
+          {/* Bottom Shutter Dock */}
           <div className="flex items-center justify-between px-8 py-5 bg-gray-950/90 z-20">
-            {/* Import Button */}
             <button
               onClick={() => {
                 triggerHaptic('light');
                 fileInputRef.current?.click();
               }}
               className="btn-press w-13 h-13 rounded-2xl bg-gray-900 border border-gray-800 hover:border-gray-700 flex flex-col items-center justify-center text-gray-300 hover:text-white"
-              aria-label="Import existing image"
               title="Import image from files"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
@@ -581,7 +645,7 @@ export default function CameraPage() {
               onChange={handleImport}
             />
 
-            {/* Shutter Button (Heavy tactile press ring) */}
+            {/* Shutter Button */}
             <button
               onClick={triggerShutter}
               className="shutter-press relative w-20 h-20 rounded-full p-1 bg-white/10 border-2 border-white/60 shadow-2xl flex items-center justify-center"
@@ -626,7 +690,7 @@ export default function CameraPage() {
                     : 'text-gray-400 hover:text-gray-200'
                 }`}
               >
-                📍 Overlaid Photo
+                📍 Rich Geotag HUD
               </button>
               <button
                 onClick={() => {
@@ -644,8 +708,8 @@ export default function CameraPage() {
             </div>
           </div>
 
-          {/* Photo Preview Canvas / Image */}
-          <div className="relative bg-black flex-1 min-h-[48vh] max-h-[58vh] flex items-center justify-center overflow-hidden">
+          {/* Photo Canvas Preview */}
+          <div className="relative bg-black flex-1 min-h-[44vh] max-h-[54vh] flex items-center justify-center overflow-hidden">
             {previewURL && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -662,20 +726,32 @@ export default function CameraPage() {
             )}
 
             {isProcessing && (
-              <div className="absolute inset-0 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
+              <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
                 <div className="w-10 h-10 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
-                <span className="text-xs font-semibold text-blue-200 tracking-wide">
-                  Generating high-res overlay…
+                <span className="text-xs font-bold text-blue-200 tracking-wide">
+                  Generating high-density geotag overlay…
                 </span>
               </div>
             )}
           </div>
 
-          {/* Style Selector Chips (When Overlaid tab is active) */}
+          {/* Editable Project / Site Note Bar */}
+          <div className="px-4 py-2.5 bg-gray-900 border-t border-b border-gray-800 flex items-center gap-2">
+            <span className="text-sm">🏷</span>
+            <input
+              type="text"
+              placeholder="Add Project / Site Note (burns onto photo)…"
+              value={noteText}
+              onChange={(e) => handleNoteChange(e.target.value)}
+              className="flex-1 bg-gray-800/90 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          {/* Style Selector Chips */}
           {activePreviewTab === 'overlay' && (
-            <div className="px-4 py-2.5 bg-gray-900 border-t border-b border-gray-800 flex items-center justify-between gap-2 overflow-x-auto">
+            <div className="px-4 py-2 bg-gray-925 border-b border-gray-800 flex items-center justify-between gap-2 overflow-x-auto">
               <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider shrink-0">
-                Overlay:
+                Overlay Style:
               </span>
               <div className="flex gap-1.5">
                 {(['pro', 'badge', 'minimal'] as OverlayStyle[]).map((st) => (
@@ -688,24 +764,24 @@ export default function CameraPage() {
                         : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
                     }`}
                   >
-                    {st === 'pro' ? 'Pro HUD' : st === 'badge' ? 'Corner Badge' : 'Minimal'}
+                    {st === 'pro' ? 'Pro Telemetry HUD' : st === 'badge' ? 'Corner Badge' : 'Minimal'}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          {/* GPS Status & Update Button */}
+          {/* Telemetry Summary Drawer */}
           <div className="px-4 py-2.5 flex items-center justify-between bg-gray-950 border-b border-gray-850">
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${gps ? 'bg-emerald-400' : 'bg-gray-500'}`} />
               <div className="flex flex-col">
-                <span className="text-xs font-mono font-semibold text-gray-200">
-                  {gps ? `${gps.latitude.toFixed(5)}°, ${gps.longitude.toFixed(5)}°` : 'No location attached'}
+                <span className="text-xs font-mono font-bold text-gray-200">
+                  {gps ? `${gps.latitude.toFixed(6)}°, ${gps.longitude.toFixed(6)}°` : 'No GPS coordinates'}
                 </span>
                 {gps && (
-                  <span className="text-[10px] text-gray-400">
-                    Accuracy: ±{gps.accuracy.toFixed(0)}m
+                  <span className="text-[10px] text-gray-400 font-mono">
+                    DMS: {toDMS(gps.latitude, true)}, {toDMS(gps.longitude, false)} · ±{gps.accuracy.toFixed(0)}m
                   </span>
                 )}
               </div>
@@ -717,13 +793,12 @@ export default function CameraPage() {
               className="btn-press px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-750 text-blue-300 hover:text-blue-200 text-xs font-semibold flex items-center gap-1.5 border border-gray-700"
             >
               <span>{isGettingGps ? '⌛' : '📍'}</span>
-              <span>{isGettingGps ? 'Locating…' : gps ? 'Update GPS' : 'Attach GPS'}</span>
+              <span>{isGettingGps ? 'Locating…' : gps ? 'Refresh GPS' : 'Attach GPS'}</span>
             </button>
           </div>
 
           {/* Action Buttons Toolbar */}
           <div className="p-4 flex flex-col gap-2.5 bg-gray-950">
-            {/* Primary Save Button */}
             <button
               onClick={savePhoto}
               disabled={isProcessing}
@@ -733,7 +808,6 @@ export default function CameraPage() {
               <span>Save to Local Gallery</span>
             </button>
 
-            {/* Secondary Buttons Row */}
             <div className="flex gap-2">
               <button
                 onClick={retake}
@@ -756,10 +830,6 @@ export default function CameraPage() {
                 <span>↗</span> Share
               </button>
             </div>
-
-            <p className="text-[11px] text-gray-500 text-center mt-1">
-              🔒 Your photos and location data remain 100% private on this device.
-            </p>
           </div>
         </div>
       )}

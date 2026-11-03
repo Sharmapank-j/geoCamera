@@ -11,6 +11,7 @@ import PhotoCard, { GalleryViewMode } from '@/components/PhotoCard';
 import NavBar from '@/components/NavBar';
 import { exportMetadataJSON, exportZIP, importZIP } from '@/lib/exportImport';
 import { triggerHaptic } from '@/lib/feedback';
+import { toDMS } from '@/lib/overlay';
 
 type FilterType = 'all' | 'geotagged' | 'today' | 'month';
 type SortOrder = 'newest' | 'oldest';
@@ -629,15 +630,20 @@ export default function GalleryPage() {
                     {new Date(activePhoto.capturedAt).toLocaleString()}
                   </p>
                   {activePhoto.latitude !== undefined && (
-                    <div className="flex items-center gap-2 mt-1 font-mono text-xs text-blue-400">
-                      <span>
-                        📍 {activePhoto.latitude.toFixed(6)}°, {activePhoto.longitude!.toFixed(6)}°
-                      </span>
-                      {activePhoto.accuracy !== undefined && (
-                        <span className="text-gray-400 font-sans text-[11px]">
-                          (±{activePhoto.accuracy.toFixed(0)}m)
+                    <div className="flex flex-col gap-0.5 mt-1 font-mono text-xs text-blue-400">
+                      <div className="flex items-center gap-2">
+                        <span>
+                          DD:  {activePhoto.latitude.toFixed(6)}°, {activePhoto.longitude!.toFixed(6)}°
                         </span>
-                      )}
+                        {activePhoto.accuracy !== undefined && (
+                          <span className="text-amber-300 font-sans text-[11px]">
+                            (±{activePhoto.accuracy.toFixed(0)}m)
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-emerald-400">
+                        DMS: {toDMS(activePhoto.latitude, true)}, {toDMS(activePhoto.longitude!, false)}
+                      </div>
                     </div>
                   )}
                   {activePhoto.address && (
