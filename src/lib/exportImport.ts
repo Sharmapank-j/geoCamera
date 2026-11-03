@@ -4,8 +4,10 @@ import JSZip from 'jszip';
 import { addPhoto, getAllPhotos, PhotoRecordLocal } from './localDB';
 
 // ---------- JSON Metadata Export ----------
-export async function exportMetadataJSON(): Promise<void> {
-  const photos = await getAllPhotos();
+export async function exportMetadataJSON(photosSubset?: PhotoRecordLocal[]): Promise<void> {
+  const photos = photosSubset || (await getAllPhotos());
+  if (photos.length === 0) throw new Error('No photos to export.');
+
   const meta = photos.map(({ id, latitude, longitude, accuracy, capturedAt, address }) => ({
     id,
     latitude,
@@ -18,9 +20,9 @@ export async function exportMetadataJSON(): Promise<void> {
   triggerDownload(blob, `geocamera-metadata-${dateTag()}.json`);
 }
 
-// ---------- ZIP Export (photos + metadata) ----------
-export async function exportZIP(): Promise<void> {
-  const photos = await getAllPhotos();
+// ---------- ZIP Export (all or selected photos + metadata) ----------
+export async function exportZIP(photosSubset?: PhotoRecordLocal[]): Promise<void> {
+  const photos = photosSubset || (await getAllPhotos());
   if (photos.length === 0) throw new Error('No photos to export.');
 
   const zip = new JSZip();
@@ -35,7 +37,8 @@ export async function exportZIP(): Promise<void> {
   zip.file('metadata.json', JSON.stringify(meta, null, 2));
 
   const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  triggerDownload(content, `geocamera-backup-${dateTag()}.zip`);
+  const prefix = photosSubset ? 'geocamera-selected' : 'geocamera-backup';
+  triggerDownload(content, `${prefix}-${dateTag()}.zip`);
 }
 
 // ---------- ZIP Import ----------
@@ -43,7 +46,7 @@ export async function importZIP(file: File): Promise<number> {
   const zip = await JSZip.loadAsync(file);
 
   const metaFile = zip.file('metadata.json');
-  if (!metaFile) throw new Error('Invalid backup: metadata.json not found.');
+  if (!metaFile) throw new Error('Invalid backup: metadata.json not found in archive.');
 
   const metaText = await metaFile.async('string');
   const records: Omit<PhotoRecordLocal, 'blob'>[] = JSON.parse(metaText);

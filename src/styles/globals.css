@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Safe area insets for notched phones */
+/* Safe area insets for notched phones & edge-to-edge layouts */
 :root {
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
@@ -16,8 +16,99 @@ html, body {
   padding: 0;
   height: 100%;
   overscroll-behavior: none;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 video {
   object-fit: cover;
+}
+
+/* Tactile button press interactions */
+.btn-press {
+  transition: transform 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              filter 0.15s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+.btn-press:active:not(:disabled) {
+  transform: scale(0.95);
+  filter: brightness(0.92);
+}
+
+/* Heavy tactile press for Shutter button */
+.shutter-press {
+  transition: transform 0.12s cubic-bezier(0.2, 0.8, 0.2, 1),
+              box-shadow 0.15s ease-out;
+  will-change: transform;
+}
+
+.shutter-press:active:not(:disabled) {
+  transform: scale(0.90);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.4);
+}
+
+/* Glassmorphism helpers */
+.glass-dark {
+  background: rgba(15, 23, 42, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(229, 231, 235, 0.8);
+}
+
+/* Shutter flash animation */
+@keyframes cameraFlash {
+  0% {
+    opacity: 1;
+  }
+  30% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-shutter-flash {
+  animation: cameraFlash 0.28s cubic-bezier(0.1, 0.9, 0.2, 1) forwards;
+}
+
+/* Pulse radar for GPS */
+@keyframes radarPing {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.animate-radar-ping {
+  animation: radarPing 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Custom minimal scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.6);
 }

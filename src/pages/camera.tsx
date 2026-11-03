@@ -3,8 +3,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { generateOverlay, OverlayMeta } from '@/lib/overlay';
 import { addPhoto } from '@/lib/localDB';
 import NavBar from '@/components/NavBar';
+import {
+  triggerHaptic,
+  playShutterSound,
+  playTickSound,
+  getAutoGpsEnabled,
+  setAutoGpsEnabled,
+  getHighAccuracyEnabled,
+} from '@/lib/feedback';
 
 type Mode = 'camera' | 'preview';
+type GridMode = 'none' | '3x3' | 'crosshair';
+type TimerDuration = 0 | 3 | 5;
+type OverlayStyle = 'pro' | 'badge' | 'minimal';
 
 interface GpsData {
   latitude: number;
@@ -24,15 +35,32 @@ export default function CameraPage() {
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [finalBlob, setFinalBlob] = useState<Blob | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
+  const [activePreviewTab, setActivePreviewTab] = useState<'overlay' | 'raw'>('overlay');
+
+  // GPS state
   const [gps, setGps] = useState<GpsData | null>(null);
   const [isGettingGps, setIsGettingGps] = useState(false);
+  const [autoGps, setAutoGps] = useState(false);
+
+  // Camera settings & controls
+  const [gridMode, setGridMode] = useState<GridMode>('3x3');
+  const [timerDuration, setTimerDuration] = useState<TimerDuration>(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const [overlayStyle, setOverlayStyle] = useState<OverlayStyle>('pro');
+
+  // UI animations & messages
+  const [shutterFlashing, setShutterFlashing] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [status, setStatus] = useState('');
   const [savedMsg, setSavedMsg] = useState('');
 
+  // Read stored preferences on mount
+  useEffect(() => {
+    setAutoGps(getAutoGpsEnabled());
+  }, []);
+
   // ── Camera stream management ────────────────────────────────────────────────
   const startCamera = useCallback(async () => {
-    // Stop any existing stream first
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     try {
@@ -56,12 +84,8 @@ export default function CameraPage() {
 
   useEffect(() => {
     if (mode === 'camera') startCamera();
-    return () => {
-      // Keep stream alive while on camera screen
-    };
   }, [mode, startCamera]);
 
-  // Stop stream when leaving camera mode
   useEffect(() => {
     if (mode !== 'camera') {
       streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -69,18 +93,94 @@ export default function CameraPage() {
     }
   }, [mode]);
 
-  // Revoke object URLs to prevent memory leaks
   useEffect(() => {
     return () => {
       if (previewURL) URL.revokeObjectURL(previewURL);
     };
   }, [previewURL]);
 
-  // ── Capture ─────────────────────────────────────────────────────────────────
-  const capturePhoto = () => {
+  // ── GPS Acquisition ──────────────────────────────────────────────────────────
+  const fetchGps = useCallback((): Promise<GpsData | null> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        setStatus('Geolocation not supported by this browser.');
+        resolve(null);
+        return;
+      }
+      setIsGettingGps(true);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const gpsData: GpsData = {
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+            timestamp: pos.timestamp,
+          };
+          setGps(gpsData);
+          setIsGettingGps(false);
+          resolve(gpsData);
+        },
+        (err) => {
+          setIsGettingGps(false);
+          setStatus(`GPS denied: ${err.message}`);
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: getHighAccuracyEnabled(),
+          timeout: 12000,
+          maximumAge: 10000,
+        }
+      );
+    });
+  }, []);
+
+  const handleManualGpsTrigger = async () => {
+    triggerHaptic('medium');
+    const data = await fetchGps();
+    if (data) {
+      triggerHaptic('success');
+    }
+  };
+
+  // ── Capture with Shutter Flash & Haptics ──────────────────────────────────────
+  const triggerShutter = () => {
+    if (timerDuration > 0) {
+      runCountdown(timerDuration);
+    } else {
+      executePhotoCapture();
+    }
+  };
+
+  const runCountdown = (seconds: number) => {
+    setCountdown(seconds);
+    playTickSound();
+    triggerHaptic('light');
+
+    let current = seconds;
+    const interval = setInterval(() => {
+      current -= 1;
+      if (current > 0) {
+        setCountdown(current);
+        playTickSound();
+        triggerHaptic('light');
+      } else {
+        clearInterval(interval);
+        setCountdown(null);
+        executePhotoCapture();
+      }
+    }, 1000);
+  };
+
+  const executePhotoCapture = async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
+
+    // Trigger visual flash, shutter sound, and tactile haptic vibration burst!
+    setShutterFlashing(true);
+    playShutterSound();
+    triggerHaptic('shutter');
+    setTimeout(() => setShutterFlashing(false), 280);
 
     canvas.width = video.videoWidth || 1280;
     canvas.height = video.videoHeight || 720;
@@ -95,74 +195,53 @@ export default function CameraPage() {
     if (facingMode === 'user') ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     canvas.toBlob(
-      (blob) => {
+      async (blob) => {
         if (!blob) return;
         setCapturedBlob(blob);
         setFinalBlob(null);
-        setGps(null);
-        const url = URL.createObjectURL(blob);
-        setPreviewURL(url);
+
+        // Check if Auto-GPS is enabled
+        let currentGps = gps;
+        if (autoGps && !currentGps) {
+          currentGps = await fetchGps();
+        }
+
+        // Generate initial overlay
+        await rebuildOverlay(blob, currentGps, overlayStyle);
+
         setMode('preview');
+        setActivePreviewTab('overlay');
       },
       'image/jpeg',
       0.95
     );
   };
 
-  // ── Import existing photo ────────────────────────────────────────────────────
+  // ── Import Existing Photo ────────────────────────────────────────────────────
   const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    triggerHaptic('medium');
     const blob = new Blob([file], { type: file.type });
     setCapturedBlob(blob);
     setFinalBlob(null);
     setGps(null);
-    if (previewURL) URL.revokeObjectURL(previewURL);
-    setPreviewURL(URL.createObjectURL(blob));
+    rebuildOverlay(blob, null, overlayStyle);
     setMode('preview');
-    // Reset input so the same file can be re-selected
     e.target.value = '';
   };
 
-  // ── GPS ──────────────────────────────────────────────────────────────────────
-  const attachLocation = async () => {
-    if (!navigator.geolocation) {
-      setStatus('Geolocation not supported by this browser.');
-      return;
-    }
-    setIsGettingGps(true);
-    setStatus('Getting GPS…');
-
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const gpsData: GpsData = {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-          timestamp: pos.timestamp,
-        };
-        setGps(gpsData);
-        setStatus('');
-        setIsGettingGps(false);
-
-        // Generate overlay with GPS data
-        if (capturedBlob) {
-          await rebuildOverlay(capturedBlob, gpsData);
-        }
-      },
-      (err) => {
-        setIsGettingGps(false);
-        setStatus(`GPS denied: ${err.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  };
-
-  const rebuildOverlay = async (blob: Blob, gpsData?: GpsData | null) => {
+  // ── Rebuild Overlay with Style ────────────────────────────────────────────────
+  const rebuildOverlay = async (
+    blob: Blob,
+    gpsData?: GpsData | null,
+    style: OverlayStyle = 'pro'
+  ) => {
     setIsProcessing(true);
     try {
       const meta: OverlayMeta = {
         capturedAt: gpsData ? new Date(gpsData.timestamp).toISOString() : new Date().toISOString(),
+        style,
         ...(gpsData && {
           latitude: gpsData.latitude,
           longitude: gpsData.longitude,
@@ -175,27 +254,44 @@ export default function CameraPage() {
       setPreviewURL(URL.createObjectURL(overlaid));
     } catch (err) {
       console.error('Overlay failed:', err);
-      setStatus('Overlay generation failed – saving original.');
+      setStatus('Overlay generation failed – using raw photo.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // ── Save ─────────────────────────────────────────────────────────────────────
-  const savePhoto = async (withOverlay: boolean) => {
-    const blobToSave = withOverlay
-      ? (finalBlob ?? capturedBlob)
-      : capturedBlob;
+  const changeOverlayStyle = (newStyle: OverlayStyle) => {
+    triggerHaptic('selection');
+    setOverlayStyle(newStyle);
+    if (capturedBlob) {
+      rebuildOverlay(capturedBlob, gps, newStyle);
+    }
+  };
+
+  // ── Attach/Update GPS from Preview ──────────────────────────────────────────
+  const handleAttachGpsInPreview = async () => {
+    triggerHaptic('medium');
+    const data = await fetchGps();
+    if (data && capturedBlob) {
+      triggerHaptic('success');
+      await rebuildOverlay(capturedBlob, data, overlayStyle);
+    }
+  };
+
+  // ── Save to Gallery ──────────────────────────────────────────────────────────
+  const savePhoto = async () => {
+    triggerHaptic('medium');
+    const blobToSave = activePreviewTab === 'overlay' ? (finalBlob ?? capturedBlob) : capturedBlob;
     if (!blobToSave) return;
 
     setIsProcessing(true);
     try {
-      // If saving without location and no overlay yet, still burn in a timestamp overlay
       let finalToSave = blobToSave;
-      if (!finalBlob) {
+      if (activePreviewTab === 'overlay' && !finalBlob) {
         try {
           finalToSave = await generateOverlay(blobToSave, {
             capturedAt: new Date().toISOString(),
+            style: overlayStyle,
           });
         } catch {
           finalToSave = blobToSave;
@@ -212,32 +308,35 @@ export default function CameraPage() {
         capturedAt: gps ? new Date(gps.timestamp).toISOString() : new Date().toISOString(),
       });
 
+      triggerHaptic('success');
       setSavedMsg('✓ Saved to gallery');
       setTimeout(() => setSavedMsg(''), 2500);
       retake();
     } catch (err) {
       console.error(err);
+      triggerHaptic('warning');
       setStatus('Save failed.');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  // ── Download ─────────────────────────────────────────────────────────────────
+  // ── Download & Share ────────────────────────────────────────────────────────
   const downloadPhoto = () => {
-    const blob = finalBlob ?? capturedBlob;
+    triggerHaptic('medium');
+    const blob = activePreviewTab === 'overlay' ? (finalBlob ?? capturedBlob) : capturedBlob;
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `geocamera-${Date.now()}.jpg`;
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 3000);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
   };
 
-  // ── Share ─────────────────────────────────────────────────────────────────────
   const sharePhoto = async () => {
-    const blob = finalBlob ?? capturedBlob;
+    triggerHaptic('medium');
+    const blob = activePreviewTab === 'overlay' ? (finalBlob ?? capturedBlob) : capturedBlob;
     if (!blob) return;
     const file = new File([blob], 'geocamera-photo.jpg', { type: 'image/jpeg' });
     if (navigator.canShare?.({ files: [file] })) {
@@ -249,65 +348,140 @@ export default function CameraPage() {
             ? `📍 ${gps.latitude.toFixed(5)}, ${gps.longitude.toFixed(5)}`
             : 'Photo from GeoTag Camera',
         });
+        triggerHaptic('success');
       } catch (e: any) {
-        if (e.name !== 'AbortError') setStatus('Share failed.');
+        if (e.name !== 'AbortError') triggerHaptic('warning');
       }
     } else {
-      setStatus('Web Share not supported — use Download instead.');
+      triggerHaptic('warning');
+      setStatus('Web Share not supported on this browser — use Download.');
     }
   };
 
-  // ── Retake ────────────────────────────────────────────────────────────────────
+  // ── Retake & Reset ───────────────────────────────────────────────────────────
   const retake = () => {
+    triggerHaptic('light');
     if (previewURL) URL.revokeObjectURL(previewURL);
     setCapturedBlob(null);
     setFinalBlob(null);
     setPreviewURL(null);
-    setGps(null);
     setStatus('');
     setMode('camera');
   };
 
-  // ── Switch camera ─────────────────────────────────────────────────────────────
   const switchCamera = () => {
+    triggerHaptic('medium');
     setFacingMode((prev) => (prev === 'environment' ? 'user' : 'environment'));
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────────
+  const toggleGrid = () => {
+    triggerHaptic('selection');
+    setGridMode((prev) => (prev === 'none' ? '3x3' : prev === '3x3' ? 'crosshair' : 'none'));
+  };
+
+  const toggleTimer = () => {
+    triggerHaptic('selection');
+    setTimerDuration((prev) => (prev === 0 ? 3 : prev === 3 ? 5 : 0));
+  };
+
+  const toggleAutoGpsSetting = () => {
+    triggerHaptic('selection');
+    const nextVal = !autoGps;
+    setAutoGps(nextVal);
+    setAutoGpsEnabled(nextVal);
+    if (nextVal && !gps) {
+      fetchGps();
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex flex-col pb-16">
-      {/* Header */}
-      <header className="flex items-center justify-between px-4 pt-4 pb-2">
-        <h1 className="text-lg font-bold tracking-wide">📍 GeoTag Camera</h1>
+    <div className="min-h-screen bg-gray-950 text-white flex flex-col pb-16 select-none overflow-hidden">
+      {/* ── TOP HUD HEADER ── */}
+      <header className="flex items-center justify-between px-3.5 pt-3 pb-2.5 z-20">
+        <div className="flex items-center gap-2">
+          <span className="text-base font-extrabold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-300 bg-clip-text text-transparent">
+            📍 GeoTag Camera
+          </span>
+        </div>
+
         {mode === 'camera' && (
-          <button
-            onClick={switchCamera}
-            className="p-2 rounded-full bg-gray-800 hover:bg-gray-700 active:bg-gray-600 transition"
-            aria-label="Switch camera"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1.5">
+            {/* Auto GPS Toggle Pill */}
+            <button
+              onClick={toggleAutoGpsSetting}
+              className={`btn-press px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all ${
+                autoGps
+                  ? 'bg-blue-600 text-white shadow-xs shadow-blue-500/50'
+                  : 'bg-gray-800/80 text-gray-400 hover:text-gray-200'
+              }`}
+              title="Automatically geotag upon capture"
+            >
+              <span>🛰</span>
+              <span>{autoGps ? 'Auto-GPS' : 'Manual GPS'}</span>
+            </button>
+
+            {/* Grid Toggle */}
+            <button
+              onClick={toggleGrid}
+              className={`btn-press p-2 rounded-full text-xs font-bold transition-colors ${
+                gridMode !== 'none'
+                  ? 'bg-blue-600/30 text-blue-400 border border-blue-500/40'
+                  : 'bg-gray-800/70 text-gray-400 hover:text-white'
+              }`}
+              aria-label="Toggle grid"
+              title="Grid overlay"
+            >
+              {gridMode === 'none' ? '# Off' : gridMode === '3x3' ? '3×3' : '✚'}
+            </button>
+
+            {/* Timer Toggle */}
+            <button
+              onClick={toggleTimer}
+              className={`btn-press p-2 rounded-full text-xs font-bold transition-colors ${
+                timerDuration > 0
+                  ? 'bg-amber-600/30 text-amber-300 border border-amber-500/40'
+                  : 'bg-gray-800/70 text-gray-400 hover:text-white'
+              }`}
+              aria-label="Toggle timer"
+              title="Self timer"
+            >
+              {timerDuration > 0 ? `⏱ ${timerDuration}s` : '⏱ Off'}
+            </button>
+
+            {/* Flip Camera */}
+            <button
+              onClick={switchCamera}
+              className="btn-press p-2 rounded-full bg-gray-800/80 hover:bg-gray-700 text-white transition active:rotate-180"
+              aria-label="Switch camera"
+              title="Switch camera"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            </button>
+          </div>
         )}
       </header>
 
-      {/* Status bar */}
+      {/* Status & Saved banners */}
       {status && (
-        <div className="mx-4 mb-2 px-3 py-2 rounded-lg bg-red-900/60 text-red-200 text-sm">
-          {status}
+        <div className="mx-4 mb-2 px-3.5 py-2 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-center justify-between animate-fade-in">
+          <span>{status}</span>
+          <button onClick={() => setStatus('')} className="p-1 font-bold text-red-400">✕</button>
         </div>
       )}
       {savedMsg && (
-        <div className="mx-4 mb-2 px-3 py-2 rounded-lg bg-green-900/60 text-green-200 text-sm">
-          {savedMsg}
+        <div className="mx-4 mb-2 px-3.5 py-2 rounded-xl bg-emerald-950/90 border border-emerald-600 text-emerald-200 text-xs font-semibold flex items-center gap-2">
+          <span className="text-base">✓</span>
+          <span>{savedMsg}</span>
         </div>
       )}
 
       {/* ── CAMERA MODE ── */}
       {mode === 'camera' && (
-        <div className="flex-1 flex flex-col">
-          <div className="relative flex-1 bg-black overflow-hidden">
+        <div className="flex-1 flex flex-col relative">
+          {/* Live Viewfinder */}
+          <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
             <video
               ref={videoRef}
               autoPlay
@@ -315,139 +489,284 @@ export default function CameraPage() {
               muted
               className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
             />
-            {/* Grid overlay (aesthetic) */}
-            <div className="absolute inset-0 pointer-events-none">
-              <div className="w-full h-full grid grid-cols-3 grid-rows-3">
+
+            {/* Shutter White Flash Effect */}
+            {shutterFlashing && (
+              <div className="absolute inset-0 bg-white z-30 animate-shutter-flash pointer-events-none" />
+            )}
+
+            {/* Timer countdown digits */}
+            {countdown !== null && (
+              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/30 backdrop-blur-xs">
+                <span className="text-8xl font-black text-white drop-shadow-2xl animate-ping scale-110">
+                  {countdown}
+                </span>
+              </div>
+            )}
+
+            {/* Grid Overlay */}
+            {gridMode === '3x3' && (
+              <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 z-10">
                 {Array.from({ length: 9 }).map((_, i) => (
-                  <div key={i} className="border border-white/10" />
+                  <div key={i} className="border border-white/20" />
                 ))}
               </div>
+            )}
+
+            {gridMode === 'crosshair' && (
+              <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+                <div className="w-16 h-16 border-2 border-dashed border-white/40 rounded-full flex items-center justify-center">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+                </div>
+              </div>
+            )}
+
+            {/* Live GPS Lock Indicator Pill on top of viewfinder */}
+            <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none z-10">
+              <button
+                onClick={handleManualGpsTrigger}
+                className="pointer-events-auto btn-press glass-dark px-3 py-1.5 rounded-full flex items-center gap-2 text-xs font-mono shadow-lg border border-white/10"
+              >
+                {isGettingGps ? (
+                  <>
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-radar-ping" />
+                    <span className="text-amber-300 font-sans font-medium text-[11px]">
+                      Locking GPS…
+                    </span>
+                  </>
+                ) : gps ? (
+                  <>
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className="text-emerald-300 font-semibold text-[11px]">
+                      {gps.latitude.toFixed(4)}°, {gps.longitude.toFixed(4)}°
+                    </span>
+                    <span className="text-gray-400 text-[10px] font-sans">
+                      (±{gps.accuracy.toFixed(0)}m)
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="w-2 h-2 rounded-full bg-gray-500" />
+                    <span className="text-gray-300 font-sans text-[11px]">
+                      Tap to acquire GPS
+                    </span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 
-          {/* Bottom controls */}
-          <div className="flex items-center justify-between px-8 py-6">
-            {/* Import */}
+          {/* Bottom Shutter & Controls Dock */}
+          <div className="flex items-center justify-between px-8 py-5 bg-gray-950/90 z-20">
+            {/* Import Button */}
             <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-14 h-14 rounded-full bg-gray-800 hover:bg-gray-700 flex items-center justify-center active:scale-95 transition"
-              aria-label="Import photo"
+              onClick={() => {
+                triggerHaptic('light');
+                fileInputRef.current?.click();
+              }}
+              className="btn-press w-13 h-13 rounded-2xl bg-gray-900 border border-gray-800 hover:border-gray-700 flex flex-col items-center justify-center text-gray-300 hover:text-white"
+              aria-label="Import existing image"
+              title="Import image from files"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-6 h-6">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
               </svg>
+              <span className="text-[9px] mt-0.5 font-medium text-gray-400">Import</span>
             </button>
-            <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImport} />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImport}
+            />
 
-            {/* Shutter */}
+            {/* Shutter Button (Heavy tactile press ring) */}
             <button
-              onClick={capturePhoto}
-              className="w-20 h-20 rounded-full bg-white border-4 border-gray-400 shadow-lg active:scale-95 transition hover:border-blue-400"
-              aria-label="Take photo"
+              onClick={triggerShutter}
+              className="shutter-press relative w-20 h-20 rounded-full p-1 bg-white/10 border-2 border-white/60 shadow-2xl flex items-center justify-center"
+              aria-label="Capture photo"
             >
-              <span className="block w-full h-full rounded-full bg-white hover:bg-gray-100" />
+              <span className="w-full h-full rounded-full bg-white hover:bg-gray-100 flex items-center justify-center transition-all shadow-inner">
+                <span className="w-14 h-14 rounded-full border border-gray-300" />
+              </span>
             </button>
 
-            {/* Placeholder to center shutter */}
-            <div className="w-14 h-14" />
+            {/* GPS Refresh Button */}
+            <button
+              onClick={handleManualGpsTrigger}
+              className={`btn-press w-13 h-13 rounded-2xl bg-gray-900 border flex flex-col items-center justify-center transition-colors ${
+                gps
+                  ? 'border-emerald-600/60 text-emerald-400'
+                  : 'border-gray-800 text-gray-400 hover:text-gray-200'
+              }`}
+              title="Acquire / Refresh GPS coordinates"
+            >
+              <span className="text-base">📍</span>
+              <span className="text-[9px] font-medium mt-0.5">{gps ? 'Locked' : 'GPS'}</span>
+            </button>
           </div>
         </div>
       )}
 
-      {/* ── PREVIEW MODE ── */}
+      {/* ── PREVIEW & REVIEW MODE ── */}
       {mode === 'preview' && (
-        <div className="flex-1 flex flex-col">
-          {/* Preview image */}
-          <div className="relative bg-black flex items-center justify-center">
+        <div className="flex-1 flex flex-col overflow-y-auto">
+          {/* Segmented Tab: Overlaid vs Clean Original */}
+          <div className="flex justify-center px-4 py-2 bg-gray-900/60 border-b border-gray-800">
+            <div className="bg-gray-800/80 p-0.5 rounded-xl flex max-w-xs w-full">
+              <button
+                onClick={() => {
+                  triggerHaptic('selection');
+                  setActivePreviewTab('overlay');
+                }}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  activePreviewTab === 'overlay'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                📍 Overlaid Photo
+              </button>
+              <button
+                onClick={() => {
+                  triggerHaptic('selection');
+                  setActivePreviewTab('raw');
+                }}
+                className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                  activePreviewTab === 'raw'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-gray-400 hover:text-gray-200'
+                }`}
+              >
+                Clean Photo
+              </button>
+            </div>
+          </div>
+
+          {/* Photo Preview Canvas / Image */}
+          <div className="relative bg-black flex-1 min-h-[48vh] max-h-[58vh] flex items-center justify-center overflow-hidden">
             {previewURL && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={previewURL}
-                alt="Preview"
-                className="w-full max-h-[60vh] object-contain"
+                src={
+                  activePreviewTab === 'overlay' && finalBlob
+                    ? previewURL
+                    : capturedBlob
+                    ? URL.createObjectURL(capturedBlob)
+                    : previewURL
+                }
+                alt="Captured Preview"
+                className="w-full h-full object-contain"
               />
             )}
-            {isProcessing && (
-              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2">
-                <div className="w-10 h-10 rounded-full border-4 border-blue-400 border-t-transparent animate-spin" />
-                <span className="text-sm text-blue-200">Rendering overlay…</span>
-              </div>
-            )}
-          </div>
 
-          {/* GPS status badge */}
-          <div className="px-4 py-3 flex items-center gap-2">
-            {gps ? (
-              <div className="flex items-center gap-2 text-green-400 text-sm">
-                <span className="text-lg">✓</span>
-                <span>
-                  GPS attached — {gps.latitude.toFixed(5)}, {gps.longitude.toFixed(5)}{' '}
-                  <span className="text-gray-400">(±{gps.accuracy.toFixed(0)}m)</span>
+            {isProcessing && (
+              <div className="absolute inset-0 bg-black/70 backdrop-blur-xs flex flex-col items-center justify-center gap-3">
+                <div className="w-10 h-10 rounded-full border-4 border-blue-500 border-t-transparent animate-spin" />
+                <span className="text-xs font-semibold text-blue-200 tracking-wide">
+                  Generating high-res overlay…
                 </span>
               </div>
-            ) : (
-              <div className="text-gray-400 text-sm">No location attached</div>
             )}
           </div>
 
-          {/* Action buttons */}
-          <div className="px-4 pb-4 flex flex-col gap-3">
-            {/* Row 1 */}
-            <div className="flex gap-3">
+          {/* Style Selector Chips (When Overlaid tab is active) */}
+          {activePreviewTab === 'overlay' && (
+            <div className="px-4 py-2.5 bg-gray-900 border-t border-b border-gray-800 flex items-center justify-between gap-2 overflow-x-auto">
+              <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider shrink-0">
+                Overlay:
+              </span>
+              <div className="flex gap-1.5">
+                {(['pro', 'badge', 'minimal'] as OverlayStyle[]).map((st) => (
+                  <button
+                    key={st}
+                    onClick={() => changeOverlayStyle(st)}
+                    className={`btn-press px-2.5 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
+                      overlayStyle === st
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    {st === 'pro' ? 'Pro HUD' : st === 'badge' ? 'Corner Badge' : 'Minimal'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* GPS Status & Update Button */}
+          <div className="px-4 py-2.5 flex items-center justify-between bg-gray-950 border-b border-gray-850">
+            <div className="flex items-center gap-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${gps ? 'bg-emerald-400' : 'bg-gray-500'}`} />
+              <div className="flex flex-col">
+                <span className="text-xs font-mono font-semibold text-gray-200">
+                  {gps ? `${gps.latitude.toFixed(5)}°, ${gps.longitude.toFixed(5)}°` : 'No location attached'}
+                </span>
+                {gps && (
+                  <span className="text-[10px] text-gray-400">
+                    Accuracy: ±{gps.accuracy.toFixed(0)}m
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={handleAttachGpsInPreview}
+              disabled={isGettingGps || isProcessing}
+              className="btn-press px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-750 text-blue-300 hover:text-blue-200 text-xs font-semibold flex items-center gap-1.5 border border-gray-700"
+            >
+              <span>{isGettingGps ? '⌛' : '📍'}</span>
+              <span>{isGettingGps ? 'Locating…' : gps ? 'Update GPS' : 'Attach GPS'}</span>
+            </button>
+          </div>
+
+          {/* Action Buttons Toolbar */}
+          <div className="p-4 flex flex-col gap-2.5 bg-gray-950">
+            {/* Primary Save Button */}
+            <button
+              onClick={savePhoto}
+              disabled={isProcessing}
+              className="btn-press w-full py-3.5 rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-extrabold text-sm shadow-lg shadow-emerald-900/40 flex items-center justify-center gap-2"
+            >
+              <span className="text-lg">💾</span>
+              <span>Save to Local Gallery</span>
+            </button>
+
+            {/* Secondary Buttons Row */}
+            <div className="flex gap-2">
               <button
                 onClick={retake}
-                className="flex-1 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 font-medium text-sm active:scale-95 transition"
+                className="btn-press flex-1 py-2.5 rounded-xl bg-gray-850 hover:bg-gray-800 text-gray-300 font-semibold text-xs border border-gray-700 flex items-center justify-center gap-1.5"
               >
-                ↩ Retake
+                <span>↩</span> Retake
               </button>
-              <button
-                onClick={attachLocation}
-                disabled={isGettingGps || isProcessing}
-                className="flex-1 py-3 rounded-xl bg-blue-700 hover:bg-blue-600 disabled:opacity-60 font-medium text-sm active:scale-95 transition"
-              >
-                {isGettingGps ? '⌛ Getting GPS…' : gps ? '🔄 Update GPS' : '📍 Attach GPS'}
-              </button>
-            </div>
-
-            {/* Row 2 */}
-            <div className="flex gap-3">
-              <button
-                onClick={() => savePhoto(true)}
-                disabled={isProcessing}
-                className="flex-1 py-3 rounded-xl bg-green-700 hover:bg-green-600 disabled:opacity-60 font-bold text-sm active:scale-95 transition"
-              >
-                💾 Save to Gallery
-              </button>
-            </div>
-
-            {/* Row 3 */}
-            <div className="flex gap-3">
               <button
                 onClick={downloadPhoto}
                 disabled={isProcessing}
-                className="flex-1 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 disabled:opacity-60 text-sm active:scale-95 transition"
+                className="btn-press flex-1 py-2.5 rounded-xl bg-gray-850 hover:bg-gray-800 text-gray-300 font-semibold text-xs border border-gray-700 flex items-center justify-center gap-1.5"
               >
-                ⬇ Download
+                <span>⬇</span> Download
               </button>
               <button
                 onClick={sharePhoto}
                 disabled={isProcessing}
-                className="flex-1 py-2.5 rounded-xl bg-gray-700 hover:bg-gray-600 disabled:opacity-60 text-sm active:scale-95 transition"
+                className="btn-press flex-1 py-2.5 rounded-xl bg-gray-850 hover:bg-gray-800 text-gray-300 font-semibold text-xs border border-gray-700 flex items-center justify-center gap-1.5"
               >
-                ↗ Share
+                <span>↗</span> Share
               </button>
             </div>
 
-            <p className="text-xs text-gray-500 text-center">
-              Your photos stay on this device unless you export them.
+            <p className="text-[11px] text-gray-500 text-center mt-1">
+              🔒 Your photos and location data remain 100% private on this device.
             </p>
           </div>
         </div>
       )}
 
-      {/* Hidden canvas for capture */}
+      {/* Hidden canvas for image capture */}
       <canvas ref={canvasRef} className="hidden" />
-      <NavBar active="camera" />
+      <NavBar active="camera" darkTheme />
     </div>
   );
 }

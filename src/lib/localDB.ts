@@ -20,11 +20,10 @@ let dbPromise: Promise<IDBPDatabase<any>> | null = null;
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db) {
         if (!db.objectStoreNames.contains(STORE_NAME)) {
           db.createObjectStore(STORE_NAME, { keyPath: 'id' });
         }
-        // v1 → v2: lat/lng/accuracy made optional — no structural change needed
       },
     });
   }
@@ -53,7 +52,39 @@ export async function deletePhoto(id: string): Promise<void> {
   await db.delete(STORE_NAME, id);
 }
 
+export async function deletePhotos(ids: string[]): Promise<void> {
+  const db = await getDB();
+  const tx = db.transaction(STORE_NAME, 'readwrite');
+  for (const id of ids) {
+    await tx.store.delete(id);
+  }
+  await tx.done;
+}
+
 export async function clearAll(): Promise<void> {
   const db = await getDB();
   await db.clear(STORE_NAME);
+}
+
+export async function getStorageStats(): Promise<{
+  totalPhotos: number;
+  geotaggedPhotos: number;
+  totalBytes: number;
+}> {
+  const photos = await getAllPhotos();
+  let totalBytes = 0;
+  let geotaggedPhotos = 0;
+
+  for (const p of photos) {
+    totalBytes += p.blob.size || 0;
+    if (p.latitude !== undefined && p.longitude !== undefined) {
+      geotaggedPhotos++;
+    }
+  }
+
+  return {
+    totalPhotos: photos.length,
+    geotaggedPhotos,
+    totalBytes,
+  };
 }
