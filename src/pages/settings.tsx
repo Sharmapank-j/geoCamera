@@ -175,6 +175,44 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {/* ── 100% FREE MODE STATUS CARD ── */}
+        <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 border border-emerald-200/80 rounded-2xl p-4 shadow-xs">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">🌿</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <p className="font-extrabold text-emerald-950 text-sm">100% Free Mode Active</p>
+                  <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    Zero Cost
+                  </span>
+                </div>
+                <p className="text-emerald-900 text-xs mt-1 leading-relaxed">
+                  GeoTag Camera operates without any paid API keys, paid cloud accounts, or credit card requirements:
+                </p>
+                <div className="mt-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] font-medium text-emerald-900/90">
+                  <div className="flex items-center gap-1.5 bg-white/70 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <span className="text-emerald-700">✓</span>
+                    <span><strong>Geocoder:</strong> OpenStreetMap Nominatim (Free)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white/70 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <span className="text-emerald-700">✓</span>
+                    <span><strong>Map:</strong> Local Vector SVG (Zero Paid Tiles)</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white/70 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <span className="text-emerald-700">✓</span>
+                    <span><strong>Offline:</strong> Mathematical Geodesics</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 bg-white/70 px-2.5 py-1.5 rounded-lg border border-emerald-100">
+                    <span className="text-emerald-700">✓</span>
+                    <span><strong>Storage:</strong> Unlimited Browser IndexedDB</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* ── INTERACTION & FEEDBACK TOGGLES ── */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-xs overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
