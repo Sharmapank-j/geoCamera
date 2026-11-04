@@ -8,14 +8,20 @@ export async function exportMetadataJSON(photosSubset?: PhotoRecordLocal[]): Pro
   const photos = photosSubset || (await getAllPhotos());
   if (photos.length === 0) throw new Error('No photos to export.');
 
-  const meta = photos.map(({ id, latitude, longitude, accuracy, capturedAt, address }) => ({
-    id,
-    latitude,
-    longitude,
-    accuracy,
-    capturedAt,
-    address,
-  }));
+  const meta = photos.map(
+    ({ id, latitude, longitude, accuracy, altitude, heading, speed, note, capturedAt, address }) => ({
+      id,
+      latitude,
+      longitude,
+      accuracy,
+      altitude,
+      heading,
+      speed,
+      note,
+      capturedAt,
+      address,
+    })
+  );
   const blob = new Blob([JSON.stringify(meta, null, 2)], { type: 'application/json' });
   triggerDownload(blob, `geocamera-metadata-${dateTag()}.json`);
 }
@@ -29,7 +35,9 @@ export async function exportZIP(photosSubset?: PhotoRecordLocal[]): Promise<void
   const meta: Omit<PhotoRecordLocal, 'blob'>[] = [];
 
   for (const photo of photos) {
-    zip.file(`photos/${photo.id}.jpg`, photo.blob);
+    if (photo.blob) {
+      zip.file(`photos/${photo.id}.jpg`, photo.blob);
+    }
     const { blob: _blob, ...rest } = photo;
     meta.push(rest);
   }
@@ -53,10 +61,15 @@ export async function importZIP(file: File): Promise<number> {
 
   let imported = 0;
   for (const record of records) {
-    const imgFile = zip.file(`photos/${record.id}.jpg`);
+    const photoId = record.id || crypto.randomUUID();
+    const imgFile = zip.file(`photos/${record.id}.jpg`) || zip.file(`photos/${photoId}.jpg`);
     if (!imgFile) continue;
     const blob = await imgFile.async('blob');
-    await addPhoto({ ...record, blob: new Blob([blob], { type: 'image/jpeg' }) });
+    await addPhoto({
+      ...record,
+      id: photoId,
+      blob: new Blob([blob], { type: 'image/jpeg' }),
+    });
     imported++;
   }
   return imported;

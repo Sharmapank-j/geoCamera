@@ -69,36 +69,29 @@ export function triggerHaptic(type: HapticType = 'light'): void {
   try {
     switch (type) {
       case 'selection':
-        // Extremely crisp tick for toggles / tabs
         navigator.vibrate(10);
         break;
       case 'light':
-        // Gentle tap for button presses
         navigator.vibrate(18);
         break;
       case 'medium':
-        // Noticeable click for key actions
         navigator.vibrate(35);
         break;
       case 'heavy':
-        // Strong tactile impact
         navigator.vibrate(55);
         break;
       case 'shutter':
-        // Double-tap camera shutter snap feel: press -> shutter travel -> click
         navigator.vibrate([25, 30, 45]);
         break;
       case 'success':
-        // Positive ascending tactile sequence
         navigator.vibrate([15, 45, 25]);
         break;
       case 'warning':
-        // Pulsing warning/danger rumble
         navigator.vibrate([35, 40, 35, 40, 45]);
         break;
     }
   } catch {
-    // Fail silently on browsers that block vibration in background
+    // Fail silently on browsers that restrict vibration
   }
 }
 
@@ -111,11 +104,20 @@ function getAudioContext(): AudioContext | null {
       sharedAudioCtx = new AudioCtx();
     }
     if (sharedAudioCtx.state === 'suspended') {
-      sharedAudioCtx.resume();
+      sharedAudioCtx.resume().catch(() => {});
     }
     return sharedAudioCtx;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Unlocks AudioContext during user gesture so delayed sounds (e.g. self timer) play reliably
+ */
+export function primeAudioContext(): void {
+  if (getSoundEnabled()) {
+    getAudioContext();
   }
 }
 
@@ -146,7 +148,7 @@ export function playShutterSound(): void {
     osc1.start(now);
     osc1.stop(now + 0.06);
 
-    // Second click (shutter blade curtain close) - 50ms later
+    // Second click (shutter blade curtain close) - 45ms later
     const t2 = now + 0.045;
     const osc2 = ctx.createOscillator();
     const gain2 = ctx.createGain();

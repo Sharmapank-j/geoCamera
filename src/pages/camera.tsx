@@ -7,6 +7,7 @@ import {
   triggerHaptic,
   playShutterSound,
   playTickSound,
+  primeAudioContext,
   getAutoGpsEnabled,
   setAutoGpsEnabled,
   getHighAccuracyEnabled,
@@ -16,6 +17,7 @@ type Mode = 'camera' | 'preview';
 type GridMode = 'none' | '3x3' | 'crosshair';
 type TimerDuration = 0 | 3 | 5;
 type OverlayStyle = 'pro' | 'badge' | 'minimal';
+type AspectRatioMode = '4:3' | '16:9' | '1:1' | 'full';
 
 interface GpsData {
   latitude: number;
@@ -33,9 +35,12 @@ export default function CameraPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const noteDebounceRef = useRef<NodeJS.Timeout | null>(null);
 
   const [mode, setMode] = useState<Mode>('camera');
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('environment');
+  const [aspectRatio, setAspectRatio] = useState<AspectRatioMode>('4:3');
   const [capturedBlob, setCapturedBlob] = useState<Blob | null>(null);
   const [finalBlob, setFinalBlob] = useState<Blob | null>(null);
   const [previewURL, setPreviewURL] = useState<string | null>(null);
@@ -50,7 +55,7 @@ export default function CameraPage() {
   // User Project/Site Note
   const [noteText, setNoteText] = useState('');
 
-  // Camera settings & controls
+  // Camera controls
   const [gridMode, setGridMode] = useState<GridMode>('3x3');
   const [timerDuration, setTimerDuration] = useState<TimerDuration>(0);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -66,9 +71,7 @@ export default function CameraPage() {
   useEffect(() => {
     setAutoGps(getAutoGpsEnabled());
 
-    // Listen for compass heading if available on device
     const handleOrientation = (e: DeviceOrientationEvent) => {
-      // webkitCompassHeading on iOS, or alpha on Android
       const heading = (e as any).webkitCompassHeading || (e.alpha ? 360 - e.alpha : undefined);
       if (heading !== undefined && !isNaN(heading)) {
         setDeviceHeading(Math.round(heading));
@@ -82,6 +85,12 @@ export default function CameraPage() {
     return () => {
       if (typeof window !== 'undefined') {
         window.removeEventListener('deviceorientation', handleOrientation, true);
+      }
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+      }
+      if (noteDebounceRef.current) {
+        clearTimeout(noteDebounceRef.current);
       }
     };
   }, []);
@@ -102,6 +111,8 @@ export default function CameraPage() {
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        videoRef.current.playsInline = true;
+        videoRef.current.muted = true;
       }
       setStatus('');
     } catch {
@@ -126,7 +137,7 @@ export default function CameraPage() {
     };
   }, [previewURL]);
 
-  // ── GPS Acquisition with Telemetry ───────────────────────────────────────────
+  // ── GPS & Reverse Geocoding ──────────────────────────────────────────────────
   const fetchGps = useCallback((): Promise<GpsData | null> => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
@@ -140,22 +151,23 @@ export default function CameraPage() {
           const lat = pos.coords.latitude;
           const lng = pos.coords.longitude;
 
-          // Attempt fast reverse geocode if network is reachable (3s timeout)
+          // Call server-side geocoder API route (Google Maps Platform / Nominatim proxy)
           let resolvedAddress: string | undefined = undefined;
           try {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3000);
-            const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-              { signal: controller.signal }
-            );
+            const timeoutId = setTimeout(() => controller.abort(), 3500);
+            const res = await fetch(`/api/geocode?lat=${lat}&lng=${lng}`, {
+              signal: controller.signal,
+            });
             clearTimeout(timeoutId);
             if (res.ok) {
               const data = await res.json();
-              resolvedAddress = data.display_name?.split(',').slice(0, 3).join(', ');
+              if (data.formattedAddress) {
+                resolvedAddress = data.formattedAddress;
+              }
             }
           } catch {
-            // Offline fallback: ignore reverse geocoding errors
+            // Graceful fallback to coordinate descriptor
           }
 
           const gpsData: GpsData = {
@@ -195,8 +207,11 @@ export default function CameraPage() {
     }
   };
 
-  // ── Capture with Shutter Flash & Haptics ──────────────────────────────────────
+  // ── Capture with Aspect Ratio Precision & Haptics ────────────────────────────
   const triggerShutter = () => {
+    if (countdown !== null) return;
+    primeAudioContext();
+
     if (timerDuration > 0) {
       runCountdown(timerDuration);
     } else {
@@ -210,14 +225,17 @@ export default function CameraPage() {
     triggerHaptic('light');
 
     let current = seconds;
-    const interval = setInterval(() => {
+    if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+
+    countdownTimerRef.current = setInterval(() => {
       current -= 1;
       if (current > 0) {
         setCountdown(current);
         playTickSound();
         triggerHaptic('light');
       } else {
-        clearInterval(interval);
+        if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+        countdownTimerRef.current = null;
         setCountdown(null);
         executePhotoCapture();
       }
@@ -229,22 +247,71 @@ export default function CameraPage() {
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
 
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      setStatus('Waiting for video stream to initialize…');
+      return;
+    }
+
     setShutterFlashing(true);
     playShutterSound();
     triggerHaptic('shutter');
     setTimeout(() => setShutterFlashing(false), 280);
 
-    canvas.width = video.videoWidth || 1280;
-    canvas.height = video.videoHeight || 720;
+    // Calculate source cropping rectangle according to selected aspect ratio
+    const videoW = video.videoWidth;
+    const videoH = video.videoHeight;
+    let targetW = videoW;
+    let targetH = videoH;
+    let srcX = 0;
+    let srcY = 0;
+    let srcW = videoW;
+    let srcH = videoH;
+
+    if (aspectRatio === '4:3') {
+      const targetRatio = 4 / 3;
+      if (videoW / videoH > targetRatio) {
+        srcW = Math.round(videoH * targetRatio);
+        srcX = Math.round((videoW - srcW) / 2);
+      } else {
+        srcH = Math.round(videoW / targetRatio);
+        srcY = Math.round((videoH - srcH) / 2);
+      }
+      targetW = srcW;
+      targetH = srcH;
+    } else if (aspectRatio === '16:9') {
+      const targetRatio = 16 / 9;
+      if (videoW / videoH > targetRatio) {
+        srcW = Math.round(videoH * targetRatio);
+        srcX = Math.round((videoW - srcW) / 2);
+      } else {
+        srcH = Math.round(videoW / targetRatio);
+        srcY = Math.round((videoH - srcH) / 2);
+      }
+      targetW = srcW;
+      targetH = srcH;
+    } else if (aspectRatio === '1:1') {
+      const minDim = Math.min(videoW, videoH);
+      srcW = minDim;
+      srcH = minDim;
+      srcX = Math.round((videoW - minDim) / 2);
+      srcY = Math.round((videoH - minDim) / 2);
+      targetW = minDim;
+      targetH = minDim;
+    }
+
+    canvas.width = targetW;
+    canvas.height = targetH;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
     if (facingMode === 'user') {
       ctx.translate(canvas.width, 0);
       ctx.scale(-1, 1);
+      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, targetW, targetH);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    } else {
+      ctx.drawImage(video, srcX, srcY, srcW, srcH, 0, 0, targetW, targetH);
     }
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    if (facingMode === 'user') ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     canvas.toBlob(
       async (blob) => {
@@ -281,7 +348,7 @@ export default function CameraPage() {
     e.target.value = '';
   };
 
-  // ── Rebuild Overlay with Rich Telemetry ──────────────────────────────────────
+  // ── Rebuild Overlay with Adaptive Telemetry ──────────────────────────────────
   const rebuildOverlay = async (
     blob: Blob,
     gpsData?: GpsData | null,
@@ -326,9 +393,12 @@ export default function CameraPage() {
 
   const handleNoteChange = (text: string) => {
     setNoteText(text);
-    if (capturedBlob) {
-      rebuildOverlay(capturedBlob, gps, overlayStyle, text);
-    }
+    if (noteDebounceRef.current) clearTimeout(noteDebounceRef.current);
+    noteDebounceRef.current = setTimeout(() => {
+      if (capturedBlob) {
+        rebuildOverlay(capturedBlob, gps, overlayStyle, text);
+      }
+    }, 250);
   };
 
   // ── Attach/Update GPS from Preview ──────────────────────────────────────────
@@ -369,7 +439,11 @@ export default function CameraPage() {
         latitude: gps?.latitude,
         longitude: gps?.longitude,
         accuracy: gps?.accuracy,
-        address: gps?.address || (noteText.trim() ? noteText.trim() : undefined),
+        altitude: gps?.altitude,
+        heading: gps?.heading ?? deviceHeading,
+        speed: gps?.speed,
+        note: noteText.trim() || undefined,
+        address: gps?.address,
         capturedAt: gps ? new Date(gps.timestamp).toISOString() : new Date().toISOString(),
       });
 
@@ -386,7 +460,6 @@ export default function CameraPage() {
     }
   };
 
-  // ── Download & Share ────────────────────────────────────────────────────────
   const downloadPhoto = () => {
     triggerHaptic('medium');
     const blob = activePreviewTab === 'overlay' ? (finalBlob ?? capturedBlob) : capturedBlob;
@@ -425,6 +498,11 @@ export default function CameraPage() {
 
   const retake = () => {
     triggerHaptic('light');
+    if (countdownTimerRef.current) {
+      clearInterval(countdownTimerRef.current);
+      countdownTimerRef.current = null;
+    }
+    setCountdown(null);
     if (previewURL) URL.revokeObjectURL(previewURL);
     setCapturedBlob(null);
     setFinalBlob(null);
@@ -449,6 +527,16 @@ export default function CameraPage() {
     setTimerDuration((prev) => (prev === 0 ? 3 : prev === 3 ? 5 : 0));
   };
 
+  const toggleAspectRatio = () => {
+    triggerHaptic('selection');
+    setAspectRatio((prev) => {
+      if (prev === '4:3') return '16:9';
+      if (prev === '16:9') return '1:1';
+      if (prev === '1:1') return 'full';
+      return '4:3';
+    });
+  };
+
   const toggleAutoGpsSetting = () => {
     triggerHaptic('selection');
     const nextVal = !autoGps;
@@ -458,6 +546,16 @@ export default function CameraPage() {
       fetchGps();
     }
   };
+
+  // Viewfinder aspect ratio container classes
+  const aspectContainerClass =
+    aspectRatio === '4:3'
+      ? 'aspect-[4/3] max-h-full max-w-full'
+      : aspectRatio === '16:9'
+      ? 'aspect-[16/9] max-h-full max-w-full'
+      : aspectRatio === '1:1'
+      ? 'aspect-square max-h-full max-w-full'
+      : 'w-full h-full';
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col pb-16 select-none overflow-hidden">
@@ -471,10 +569,19 @@ export default function CameraPage() {
 
         {mode === 'camera' && (
           <div className="flex items-center gap-1.5">
+            {/* Aspect Ratio Selector */}
+            <button
+              onClick={toggleAspectRatio}
+              className="btn-press px-2 py-1 rounded-full text-xs font-bold bg-gray-800/80 hover:bg-gray-700 text-blue-400 border border-blue-500/30 transition-all"
+              title="Camera Aspect Ratio"
+            >
+              {aspectRatio}
+            </button>
+
             {/* Auto GPS Toggle */}
             <button
               onClick={toggleAutoGpsSetting}
-              className={`btn-press px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all ${
+              className={`btn-press px-2 py-1 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all ${
                 autoGps
                   ? 'bg-blue-600 text-white shadow-xs shadow-blue-500/50'
                   : 'bg-gray-800/80 text-gray-400 hover:text-gray-200'
@@ -482,7 +589,7 @@ export default function CameraPage() {
               title="Automatically geotag upon capture"
             >
               <span>🛰</span>
-              <span>{autoGps ? 'Auto-GPS' : 'Manual GPS'}</span>
+              <span className="hidden sm:inline">{autoGps ? 'Auto' : 'Manual'}</span>
             </button>
 
             {/* Grid Toggle */}
@@ -539,91 +646,99 @@ export default function CameraPage() {
         </div>
       )}
 
-      {/* ── CAMERA MODE ── */}
+      {/* ── CAMERA MODE (WYSIWYG FRAMED VIEWFINDER) ── */}
       {mode === 'camera' && (
-        <div className="flex-1 flex flex-col relative">
-          <div className="relative flex-1 bg-black overflow-hidden flex items-center justify-center">
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
-            />
+        <div className="flex-1 flex flex-col relative overflow-hidden">
+          {/* Framed Viewfinder Container matching the exact chosen Aspect Ratio */}
+          <div className="relative flex-1 bg-black flex items-center justify-center p-1 overflow-hidden">
+            <div className={`relative overflow-hidden flex items-center justify-center rounded-2xl shadow-2xl border border-gray-800 ${aspectContainerClass}`}>
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+              />
 
-            {/* Shutter White Flash */}
-            {shutterFlashing && (
-              <div className="absolute inset-0 bg-white z-30 animate-shutter-flash pointer-events-none" />
-            )}
+              {/* Shutter White Flash */}
+              {shutterFlashing && (
+                <div className="absolute inset-0 bg-white z-30 animate-shutter-flash pointer-events-none" />
+              )}
 
-            {/* Timer countdown digits */}
-            {countdown !== null && (
-              <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/30 backdrop-blur-xs">
-                <span className="text-8xl font-black text-white drop-shadow-2xl animate-ping scale-110">
-                  {countdown}
-                </span>
-              </div>
-            )}
-
-            {/* Grid Overlay */}
-            {gridMode === '3x3' && (
-              <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 z-10">
-                {Array.from({ length: 9 }).map((_, i) => (
-                  <div key={i} className="border border-white/20" />
-                ))}
-              </div>
-            )}
-
-            {gridMode === 'crosshair' && (
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
-                <div className="w-16 h-16 border-2 border-dashed border-white/40 rounded-full flex items-center justify-center">
-                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+              {/* Timer countdown digits */}
+              {countdown !== null && (
+                <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none bg-black/40 backdrop-blur-xs">
+                  <span className="text-8xl font-black text-white drop-shadow-2xl animate-ping scale-110">
+                    {countdown}
+                  </span>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Top Viewfinder Telemetry Pill */}
-            <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none z-10">
-              <button
-                onClick={handleManualGpsTrigger}
-                className="pointer-events-auto btn-press glass-dark px-3.5 py-1.5 rounded-full flex items-center gap-2 text-xs font-mono shadow-lg border border-white/10"
-              >
-                {isGettingGps ? (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-radar-ping" />
-                    <span className="text-amber-300 font-sans font-medium text-[11px]">
-                      Acquiring GPS Fix…
-                    </span>
-                  </>
-                ) : gps ? (
-                  <>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="text-emerald-300 font-bold text-[11px]">
-                      {gps.latitude.toFixed(5)}°, {gps.longitude.toFixed(5)}°
-                    </span>
-                    <span className="text-blue-300 text-[10px] font-sans">
-                      ±{gps.accuracy.toFixed(0)}m
-                    </span>
-                    {deviceHeading !== undefined && (
-                      <span className="text-amber-300 text-[10px] font-mono">
-                        🧭 {getHeadingString(deviceHeading)}
+              {/* Grid Overlay */}
+              {gridMode === '3x3' && (
+                <div className="absolute inset-0 pointer-events-none grid grid-cols-3 grid-rows-3 z-10">
+                  {Array.from({ length: 9 }).map((_, i) => (
+                    <div key={i} className="border border-white/20" />
+                  ))}
+                </div>
+              )}
+
+              {gridMode === 'crosshair' && (
+                <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-10">
+                  <div className="w-16 h-16 border-2 border-dashed border-white/40 rounded-full flex items-center justify-center">
+                    <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+                  </div>
+                </div>
+              )}
+
+              {/* Top Viewfinder Telemetry Pill */}
+              <div className="absolute top-3 inset-x-0 flex justify-center pointer-events-none z-10 px-2">
+                <button
+                  onClick={handleManualGpsTrigger}
+                  className="pointer-events-auto btn-press glass-dark px-3.5 py-1.5 rounded-full flex items-center gap-2 text-xs font-mono shadow-lg border border-white/10"
+                >
+                  {isGettingGps ? (
+                    <>
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-radar-ping" />
+                      <span className="text-amber-300 font-sans font-medium text-[11px]">
+                        Acquiring GPS Fix…
                       </span>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <span className="w-2 h-2 rounded-full bg-gray-500" />
-                    <span className="text-gray-300 font-sans text-[11px]">
-                      Tap to acquire GPS Telemetry
-                    </span>
-                  </>
-                )}
-              </button>
+                    </>
+                  ) : gps ? (
+                    <>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="text-emerald-300 font-bold text-[11px]">
+                        {gps.latitude.toFixed(5)}°, {gps.longitude.toFixed(5)}°
+                      </span>
+                      <span className="text-blue-300 text-[10px] font-sans">
+                        ±{gps.accuracy.toFixed(0)}m
+                      </span>
+                      {deviceHeading !== undefined && (
+                        <span className="text-amber-300 text-[10px] font-mono">
+                          🧭 {getHeadingString(deviceHeading)}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <span className="w-2 h-2 rounded-full bg-gray-500" />
+                      <span className="text-gray-300 font-sans text-[11px]">
+                        Tap to acquire GPS Telemetry
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Aspect Ratio Badge in Viewfinder */}
+              <div className="absolute bottom-2 left-2 z-10 px-2 py-0.5 rounded-md bg-black/60 backdrop-blur-xs text-[10px] font-mono text-gray-300">
+                {aspectRatio}
+              </div>
             </div>
           </div>
 
           {/* Bottom Shutter Dock */}
-          <div className="flex items-center justify-between px-8 py-5 bg-gray-950/90 z-20">
+          <div className="flex items-center justify-between px-8 py-4 bg-gray-950/90 z-20">
             <button
               onClick={() => {
                 triggerHaptic('light');
@@ -676,7 +791,7 @@ export default function CameraPage() {
       {/* ── PREVIEW & REVIEW MODE ── */}
       {mode === 'preview' && (
         <div className="flex-1 flex flex-col overflow-y-auto">
-          {/* Segmented Tab: Overlaid vs Clean Original */}
+          {/* Segmented Tab */}
           <div className="flex justify-center px-4 py-2 bg-gray-900/60 border-b border-gray-800">
             <div className="bg-gray-800/80 p-0.5 rounded-xl flex max-w-xs w-full">
               <button
@@ -708,8 +823,8 @@ export default function CameraPage() {
             </div>
           </div>
 
-          {/* Photo Canvas Preview */}
-          <div className="relative bg-black flex-1 min-h-[44vh] max-h-[54vh] flex items-center justify-center overflow-hidden">
+          {/* Photo Preview (Preserving True Aspect Ratio) */}
+          <div className="relative bg-black flex-1 min-h-[46vh] max-h-[58vh] flex items-center justify-center p-2 overflow-hidden">
             {previewURL && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -721,7 +836,7 @@ export default function CameraPage() {
                     : previewURL
                 }
                 alt="Captured Preview"
-                className="w-full h-full object-contain"
+                className="max-h-full max-w-full object-contain rounded-xl shadow-lg border border-gray-800"
               />
             )}
 
@@ -736,7 +851,7 @@ export default function CameraPage() {
           </div>
 
           {/* Editable Project / Site Note Bar */}
-          <div className="px-4 py-2.5 bg-gray-900 border-t border-b border-gray-800 flex items-center gap-2">
+          <div className="px-4 py-2 bg-gray-900 border-t border-b border-gray-800 flex items-center gap-2">
             <span className="text-sm">🏷</span>
             <input
               type="text"
@@ -751,7 +866,7 @@ export default function CameraPage() {
           {activePreviewTab === 'overlay' && (
             <div className="px-4 py-2 bg-gray-925 border-b border-gray-800 flex items-center justify-between gap-2 overflow-x-auto">
               <span className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider shrink-0">
-                Overlay Style:
+                Overlay:
               </span>
               <div className="flex gap-1.5">
                 {(['pro', 'badge', 'minimal'] as OverlayStyle[]).map((st) => (
@@ -784,6 +899,11 @@ export default function CameraPage() {
                     DMS: {toDMS(gps.latitude, true)}, {toDMS(gps.longitude, false)} · ±{gps.accuracy.toFixed(0)}m
                   </span>
                 )}
+                {gps?.address && (
+                  <span className="text-[10px] text-blue-300 font-sans truncate max-w-[240px]">
+                    📍 {gps.address}
+                  </span>
+                )}
               </div>
             </div>
 
@@ -798,7 +918,7 @@ export default function CameraPage() {
           </div>
 
           {/* Action Buttons Toolbar */}
-          <div className="p-4 flex flex-col gap-2.5 bg-gray-950">
+          <div className="p-4 flex flex-col gap-2 bg-gray-950">
             <button
               onClick={savePhoto}
               disabled={isProcessing}

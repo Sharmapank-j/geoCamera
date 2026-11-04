@@ -77,7 +77,8 @@ export default function GalleryPage() {
           p.capturedAt.toLowerCase().includes(q) ||
           p.address?.toLowerCase().includes(q) ||
           p.latitude?.toFixed(4).includes(q) ||
-          p.longitude?.toFixed(4).includes(q)
+          p.longitude?.toFixed(4).includes(q) ||
+          p.note?.toLowerCase().includes(q)
       );
     }
 
@@ -648,6 +649,12 @@ export default function GalleryPage() {
                   )}
                   {activePhoto.address && (
                     <p className="text-xs text-gray-300 mt-1 line-clamp-1">{activePhoto.address}</p>
+                  )}
+                  {activePhoto.note && (
+                    <p className="text-xs text-yellow-300/90 mt-1 flex items-center gap-1 font-mono">
+                      <span>🏷️</span>
+                      <span className="italic">{activePhoto.note}</span>
+                    </p>
                   )}
                 </div>
 

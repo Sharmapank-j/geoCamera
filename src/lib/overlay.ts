@@ -1,5 +1,5 @@
 // src/lib/overlay.ts
-// Renders a high-density, professional GPS camera overlay onto photos (Canvas API).
+// Renders an adaptive, high-density, professional GPS camera overlay onto photos (Canvas API).
 // Works 100% offline with zero external network dependencies.
 
 export interface OverlayMeta {
@@ -71,24 +71,30 @@ export async function generateOverlay(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D context unavailable');
 
-  // 1. Draw base photo
+  // 1. Draw base photo exactly to canvas bounds (preserving original aspect ratio)
   ctx.drawImage(img, 0, 0);
   img.close();
 
   const style = meta.style || 'pro';
-  const fontSize = Math.max(13, Math.round(canvas.width / 58));
+  const isPortrait = canvas.height > canvas.width;
+  const isSquare = Math.abs(canvas.height - canvas.width) < 50;
+
+  // Base font size scaling proportional to the shorter dimension to prevent oversized fonts
+  const baseDim = Math.min(canvas.width, canvas.height);
+  const fontSize = Math.max(12, Math.round(baseDim / 44));
   const pad = Math.round(fontSize * 0.9);
+  const lineH = Math.round(fontSize * 1.45);
 
   if (style === 'minimal') {
     // ── MINIMAL COMPACT BAR ──
-    const barH = Math.round(fontSize * 3.4);
+    const barH = Math.round(fontSize * 3.6);
     const barY = canvas.height - barH;
 
-    ctx.fillStyle = 'rgba(7, 11, 20, 0.85)';
+    ctx.fillStyle = 'rgba(7, 11, 22, 0.88)';
     ctx.fillRect(0, barY, canvas.width, barH);
 
     ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = Math.max(2, Math.round(baseDim / 600));
     ctx.beginPath();
     ctx.moveTo(0, barY);
     ctx.lineTo(canvas.width, barY);
@@ -102,27 +108,27 @@ export async function generateOverlay(
       ? new Date(meta.capturedAt).toLocaleString()
       : new Date().toLocaleString();
 
-    let coordsStr = 'GeoTag Camera';
+    let coordsStr = 'GeoTag Camera Pro';
     if (meta.latitude !== undefined && meta.longitude !== undefined) {
       coordsStr = `${meta.latitude.toFixed(6)}°, ${meta.longitude.toFixed(6)}° (±${(meta.accuracy || 5).toFixed(0)}m)`;
     }
 
-    ctx.fillText(`📍 ${coordsStr}`, pad, barY + barH * 0.35);
-    ctx.font = `${Math.round(fontSize * 0.9)}px monospace`;
+    ctx.fillText(`📍 ${coordsStr}`, pad, barY + barH * 0.32);
+    ctx.font = `500 ${Math.round(fontSize * 0.85)}px monospace`;
     ctx.fillStyle = '#94a3b8';
-    ctx.fillText(dateStr, pad, barY + barH * 0.72);
+    ctx.fillText(`${dateStr} · ${getTimezoneString()}`, pad, barY + barH * 0.72);
 
   } else if (style === 'badge') {
-    // ── CORNER BADGE STYLE ──
-    const badgeW = Math.min(canvas.width * 0.85, 520);
-    const badgeH = Math.round(fontSize * 7.5);
+    // ── CORNER FLOATING BADGE STYLE ──
+    const badgeW = Math.min(canvas.width * 0.9, 560);
+    const badgeH = Math.round(fontSize * 8.0);
     const badgeX = pad;
     const badgeY = canvas.height - badgeH - pad;
-    const radius = Math.round(fontSize * 0.75);
+    const radius = Math.round(fontSize * 0.8);
 
     ctx.save();
-    ctx.fillStyle = 'rgba(7, 12, 24, 0.9)';
-    ctx.strokeStyle = 'rgba(56, 189, 248, 0.5)';
+    ctx.fillStyle = 'rgba(6, 11, 24, 0.92)';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.roundRect(badgeX, badgeY, badgeW, badgeH, radius);
@@ -134,12 +140,20 @@ export async function generateOverlay(
     ctx.textBaseline = 'top';
     ctx.fillText('📍 GeoTag Camera Pro', badgeX + pad, badgeY + pad);
 
-    ctx.font = `500 ${Math.round(fontSize * 0.95)}px monospace`;
+    ctx.font = `500 ${Math.round(fontSize * 0.90)}px monospace`;
     let lineY = badgeY + pad + fontSize * 1.6;
+
+    if (meta.address) {
+      ctx.fillStyle = '#93c5fd';
+      ctx.font = `600 ${Math.round(fontSize * 0.88)}px sans-serif`;
+      ctx.fillText(`📍 ${meta.address}`, badgeX + pad, lineY);
+      lineY += fontSize * 1.35;
+      ctx.font = `500 ${Math.round(fontSize * 0.90)}px monospace`;
+    }
 
     if (meta.latitude !== undefined && meta.longitude !== undefined) {
       ctx.fillStyle = '#4ade80';
-      ctx.fillText(`DD:  ${meta.latitude.toFixed(6)}°, ${meta.longitude.toFixed(6)}°`, badgeX + pad, lineY);
+      ctx.fillText(`DD : ${meta.latitude.toFixed(6)}°, ${meta.longitude.toFixed(6)}°`, badgeX + pad, lineY);
       lineY += fontSize * 1.3;
 
       ctx.fillStyle = '#38bdf8';
@@ -151,7 +165,7 @@ export async function generateOverlay(
       ctx.fillStyle = '#fde047';
       const altStr = meta.altitude !== undefined ? `ALT: ${meta.altitude.toFixed(1)}m ` : '';
       const accStr = meta.accuracy !== undefined ? `ACC: ±${meta.accuracy.toFixed(1)}m` : '';
-      ctx.fillText(`${altStr}${accStr}`, badgeX + pad, lineY);
+      ctx.fillText(`${altStr}${accStr} | ${getHeadingString(meta.heading)}`, badgeX + pad, lineY);
       lineY += fontSize * 1.3;
     }
 
@@ -162,45 +176,52 @@ export async function generateOverlay(
     ctx.restore();
 
   } else {
-    // ── HIGH-DENSITY PROFESSIONAL HUD OVERLAY ──
-    const panelH = Math.round(canvas.height * 0.30);
+    // ── PRO TELEMETRY HUD OVERLAY (Default) ──
+    // Compute adaptive panel height based on content and aspect ratio:
+    // Portrait photos have large vertical space, landscape has limited vertical space.
+    const itemsCount = 6 + (meta.address ? 1 : 0) + (meta.note ? 1 : 0);
+    const contentH = Math.round(itemsCount * lineH + pad * 2.2);
+    const maxRatio = isPortrait ? 0.24 : isSquare ? 0.28 : 0.32;
+    const panelH = Math.max(contentH, Math.round(canvas.height * maxRatio));
     const panelY = canvas.height - panelH;
-    const lineH = Math.round(fontSize * 1.48);
 
-    // Dark solid backdrop with frosted look
-    ctx.fillStyle = 'rgba(6, 10, 20, 0.92)';
+    // Dark obsidian glassmorphic panel
+    ctx.fillStyle = 'rgba(5, 9, 20, 0.92)';
     ctx.fillRect(0, panelY, canvas.width, panelH);
 
-    // Glowing top highlight line
-    const gradient = ctx.createLinearGradient(0, panelY, canvas.width, panelY);
-    gradient.addColorStop(0, '#38bdf8');
-    gradient.addColorStop(0.5, '#3b82f6');
-    gradient.addColorStop(1, '#818cf8');
-    ctx.strokeStyle = gradient;
-    ctx.lineWidth = Math.max(3, Math.round(canvas.width / 450));
+    // Subtle gradient accent border at top of panel
+    const topGrad = ctx.createLinearGradient(0, panelY, canvas.width, panelY);
+    topGrad.addColorStop(0, '#38bdf8');
+    topGrad.addColorStop(0.35, '#3b82f6');
+    topGrad.addColorStop(0.7, '#6366f1');
+    topGrad.addColorStop(1, '#a855f7');
+    ctx.strokeStyle = topGrad;
+    ctx.lineWidth = Math.max(3, Math.round(baseDim / 450));
     ctx.beginPath();
     ctx.moveTo(0, panelY);
     ctx.lineTo(canvas.width, panelY);
     ctx.stroke();
 
-    // ── RIGHT SIDE: TACTICAL RADAR HUD & COMPASS WIDGET ──
-    const mapSize = panelH - pad * 2;
+    // ── RIGHT SIDE: COMPACT TACTICAL RADAR & COMPASS HUD ──
+    const mapSize = Math.min(panelH - pad * 2, Math.round(canvas.width * 0.26));
     const mapX = canvas.width - mapSize - pad;
-    const mapY = panelY + pad;
+    const mapY = panelY + Math.round((panelH - mapSize) / 2);
 
-    // Tactical Radar Box
-    ctx.fillStyle = '#050914';
-    ctx.fillRect(mapX, mapY, mapSize, mapSize);
+    // Radar Container (Rounded Tactical Box)
+    ctx.save();
+    ctx.fillStyle = '#030712';
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(mapX, mapY, mapSize, mapSize, Math.round(fontSize * 0.5));
+    ctx.fill();
+    ctx.stroke();
 
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(mapX, mapY, mapSize, mapSize);
-
-    // Radar concentric range circles
+    // Radar Concentric Range Rings
     const cx = mapX + mapSize / 2;
     const cy = mapY + mapSize / 2;
-    [0.18, 0.32, 0.44].forEach((scale) => {
-      ctx.strokeStyle = 'rgba(56, 189, 248, 0.22)';
+    [0.20, 0.35, 0.45].forEach((scale) => {
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.20)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(cx, cy, mapSize * scale, 0, Math.PI * 2);
@@ -209,16 +230,17 @@ export async function generateOverlay(
 
     // Crosshairs
     ctx.strokeStyle = 'rgba(56, 189, 248, 0.4)';
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(mapX + mapSize / 2, mapY);
-    ctx.lineTo(mapX + mapSize / 2, mapY + mapSize);
-    ctx.moveTo(mapX, mapY + mapSize / 2);
-    ctx.lineTo(mapX + mapSize, mapY + mapSize / 2);
+    ctx.moveTo(mapX + mapSize / 2, mapY + 4);
+    ctx.lineTo(mapX + mapSize / 2, mapY + mapSize - 4);
+    ctx.moveTo(mapX + 4, mapY + mapSize / 2);
+    ctx.lineTo(mapX + mapSize - 4, mapY + mapSize / 2);
     ctx.stroke();
 
     // Compass Cardinal Marks (N, S, E, W)
-    ctx.font = `bold ${Math.max(9, Math.round(fontSize * 0.65))}px sans-serif`;
+    const cardFont = Math.max(9, Math.round(fontSize * 0.62));
+    ctx.font = `bold ${cardFont}px sans-serif`;
     ctx.fillStyle = '#ef4444';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
@@ -230,16 +252,17 @@ export async function generateOverlay(
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText('E', mapX + mapSize - 9, cy);
+    ctx.fillText('E', mapX + mapSize - 10, cy);
 
     ctx.textAlign = 'right';
-    ctx.fillText('W', mapX + 9, cy);
+    ctx.fillText('W', mapX + 10, cy);
 
-    // Heading indicator needle (Pointing to heading angle)
-    const headingRad = ((meta.heading || 0) - 90) * (Math.PI / 180);
+    // Heading Compass Needle (orienting to current device heading)
+    const headingDeg = meta.heading !== undefined ? meta.heading : 0;
+    const headingRad = (headingDeg - 90) * (Math.PI / 180);
     const needleLen = mapSize * 0.38;
     ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = Math.max(2, Math.round(fontSize * 0.15));
     ctx.beginPath();
     ctx.moveTo(cx, cy);
     ctx.lineTo(cx + Math.cos(headingRad) * needleLen, cy + Math.sin(headingRad) * needleLen);
@@ -251,51 +274,61 @@ export async function generateOverlay(
     ctx.arc(cx, cy, Math.max(3, mapSize * 0.05), 0, Math.PI * 2);
     ctx.fill();
 
-    // HUD Telemetry bottom bar in radar
-    ctx.fillStyle = '#0ea5e9';
-    ctx.font = `bold ${Math.max(8, Math.round(fontSize * 0.62))}px monospace`;
+    // Radar HUD Footer Badges
+    const badgeFont = Math.max(8, Math.round(fontSize * 0.58));
+    ctx.fillStyle = '#38bdf8';
+    ctx.font = `bold ${badgeFont}px monospace`;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'bottom';
-    ctx.fillText('3D LOCK', mapX + 4, mapY + mapSize - 4);
+    ctx.fillText('3D LOCK', mapX + 4, mapY + mapSize - 3);
 
     ctx.textAlign = 'right';
     ctx.fillStyle = '#4ade80';
-    ctx.fillText('FIX: OK', mapX + mapSize - 4, mapY + mapSize - 4);
+    ctx.fillText('FIX: OK', mapX + mapSize - 4, mapY + mapSize - 3);
+    ctx.restore();
 
-    // ── LEFT SIDE: RICH METADATA PANEL ──
+    // ── LEFT SIDE: RICH HIGH-DENSITY METADATA ──
     const textMaxW = mapX - pad * 2;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
 
-    // Header line: App Title & GPS Status
-    ctx.font = `bold ${Math.round(fontSize * 1.25)}px sans-serif`;
+    // 1. Header Row: Title & GPS Status Chip
+    ctx.font = `bold ${Math.round(fontSize * 1.2)}px sans-serif`;
     ctx.fillStyle = '#ffffff';
     ctx.fillText('📍 GEOTAG CAMERA PRO', pad, panelY + pad);
 
-    // Status chip next to title
-    ctx.font = `bold ${Math.round(fontSize * 0.72)}px sans-serif`;
     const titleWidth = ctx.measureText('📍 GEOTAG CAMERA PRO').width;
-    const badgeX = pad + titleWidth + 14;
-    const badgeY = panelY + pad + 2;
+    const chipX = pad + titleWidth + 12;
+    const chipY = panelY + pad + 2;
 
-    if (badgeX + 110 < textMaxW) {
-      ctx.fillStyle = '#10b981';
-      ctx.fillRect(badgeX, badgeY, 80, fontSize * 1.15);
-      ctx.fillStyle = '#ffffff';
-      ctx.fillText('✓ GPS LOCKED', badgeX + 6, badgeY + 2);
+    if (chipX + 100 < textMaxW) {
+      ctx.save();
+      ctx.fillStyle = '#064e3b';
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(chipX, chipY, 94, fontSize * 1.15, 6);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.font = `bold ${Math.round(fontSize * 0.65)}px monospace`;
+      ctx.fillStyle = '#34d399';
+      ctx.fillText('● GPS LOCKED', chipX + 8, chipY + 2);
+      ctx.restore();
     }
 
-    // Detail rows starting under header
     let curY = panelY + pad + lineH * 1.25;
 
-    const printItem = (label: string, value: string, valColor = '#e2e8f0', isMono = true) => {
+    const renderDataLine = (label: string, value: string, valColor = '#e2e8f0', isMono = true) => {
       if (!value) return;
-      ctx.font = `bold ${Math.round(fontSize * 0.88)}px monospace`;
+      ctx.font = `bold ${Math.round(fontSize * 0.85)}px monospace`;
       ctx.fillStyle = '#94a3b8';
       ctx.fillText(`${label}: `, pad, curY);
 
       const labelW = ctx.measureText(`${label}: `).width;
-      ctx.font = isMono ? `600 ${Math.round(fontSize * 0.95)}px monospace` : `600 ${Math.round(fontSize * 0.95)}px sans-serif`;
+      ctx.font = isMono
+        ? `600 ${Math.round(fontSize * 0.90)}px monospace`
+        : `600 ${Math.round(fontSize * 0.90)}px sans-serif`;
       ctx.fillStyle = valColor;
 
       let valText = value;
@@ -308,29 +341,31 @@ export async function generateOverlay(
       curY += lineH;
     };
 
-    // 1. Dual Coordinate Formats (DD + DMS)
-    if (meta.latitude !== undefined && meta.longitude !== undefined) {
-      const ddStr = `${meta.latitude.toFixed(6)}°, ${meta.longitude.toFixed(6)}°`;
-      printItem('COORD (DD) ', ddStr, '#4ade80', true);
-
-      const dmsStr = `${toDMS(meta.latitude, true)}, ${toDMS(meta.longitude, false)}`;
-      printItem('COORD (DMS)', dmsStr, '#38bdf8', true);
-    } else {
-      printItem('COORDINATES', 'Not Attached (Save without GPS)', '#cbd5e1', true);
+    // 2. Address (if available)
+    if (meta.address) {
+      renderDataLine('ADDRESS    ', meta.address, '#93c5fd', false);
     }
 
-    // 2. Elevation / Altitude & Accuracy
+    // 3. Dual Coordinates (DD + DMS)
+    if (meta.latitude !== undefined && meta.longitude !== undefined) {
+      const ddStr = `${meta.latitude.toFixed(6)}°, ${meta.longitude.toFixed(6)}°`;
+      renderDataLine('COORD (DD) ', ddStr, '#4ade80', true);
+
+      const dmsStr = `${toDMS(meta.latitude, true)}, ${toDMS(meta.longitude, false)}`;
+      renderDataLine('COORD (DMS)', dmsStr, '#38bdf8', true);
+    } else {
+      renderDataLine('COORDINATES', 'No GPS Attached (Saved Offline)', '#94a3b8', true);
+    }
+
+    // 4. Elevation, Accuracy & Heading
     const altStr = meta.altitude !== undefined
-      ? `${meta.altitude.toFixed(1)} m MSL (${(meta.altitude * 3.28084).toFixed(0)} ft)`
+      ? `${meta.altitude.toFixed(1)}m MSL (${(meta.altitude * 3.28084).toFixed(0)}ft)`
       : 'Sea Level';
-    const accStr = meta.accuracy !== undefined ? ` ±${meta.accuracy.toFixed(1)} m` : ' ±4.0 m';
-    printItem('ELEV / ACC ', `${altStr} | ACC:${accStr}`, '#fde047', true);
+    const accStr = meta.accuracy !== undefined ? ` ±${meta.accuracy.toFixed(1)}m` : ' ±4.0m';
+    const headStr = getHeadingString(meta.heading);
+    renderDataLine('ELEV / ACC ', `${altStr} | ACC:${accStr} | ${headStr}`, '#fde047', true);
 
-    // 3. Heading & Azimuth
-    const headingStr = getHeadingString(meta.heading);
-    printItem('BEARING/DIR', headingStr, '#a7f3d0', true);
-
-    // 4. Timestamp & Full Date
+    // 5. Timestamp & Date
     const now = meta.capturedAt ? new Date(meta.capturedAt) : new Date();
     const dateFormatted = now.toLocaleDateString(undefined, {
       weekday: 'short',
@@ -343,16 +378,14 @@ export async function generateOverlay(
       minute: '2-digit',
       second: '2-digit',
     });
-    printItem('DATE & TIME', `${dateFormatted} · ${timeFormatted}`, '#f1f5f9', true);
+    renderDataLine('DATE & TIME', `${dateFormatted} · ${timeFormatted}`, '#f1f5f9', true);
 
-    // 5. Timezone info
-    printItem('TIME ZONE  ', getTimezoneString(), '#94a3b8', true);
+    // 6. Timezone
+    renderDataLine('TIME ZONE  ', getTimezoneString(), '#94a3b8', true);
 
-    // 6. User Note / Project Tag / Address (if available)
+    // 7. Project Note / Site Tag (if specified)
     if (meta.note) {
-      printItem('PROJECT/TAG', meta.note, '#f472b6', false);
-    } else if (meta.address) {
-      printItem('LOCATION   ', meta.address, '#93c5fd', false);
+      renderDataLine('PROJECT/TAG', meta.note, '#f472b6', false);
     }
   }
 

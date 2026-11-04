@@ -7,6 +7,10 @@ export interface PhotoRecordLocal {
   latitude?: number;
   longitude?: number;
   accuracy?: number;
+  altitude?: number;
+  heading?: number;
+  speed?: number;
+  note?: string;
   capturedAt: string; // ISO timestamp
   address?: string;
 }
@@ -76,7 +80,7 @@ export async function getStorageStats(): Promise<{
   let geotaggedPhotos = 0;
 
   for (const p of photos) {
-    totalBytes += p.blob.size || 0;
+    totalBytes += p.blob?.size || 0;
     if (p.latitude !== undefined && p.longitude !== undefined) {
       geotaggedPhotos++;
     }
